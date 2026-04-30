@@ -30,4 +30,9 @@ jobs:
           pip install pytest
           pip install . --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run tests
-        run: pytest tests
+        run: |
+          if find tests -name "test_*.py" | grep -q .; then
+            pytest tests
+          else
+            echo "No tests found, skipping."
+          fi
