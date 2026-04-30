@@ -1,0 +1,20 @@
+repos:
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.9.9
+  hooks:
+    - id: ruff
+      types_or: [python]
+    - id: ruff-format
+      args: [--diff]
+      types_or: [python]
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+    - id: check-added-large-files # Rejects commits with overly large added files
+    - id: check-merge-conflict    # Detects unresolved Git merge conflict markers
+    - id: check-toml              # Validates TOML file syntax
+    - id: check-yaml              # Validates YAML file syntax
+    - id: end-of-file-fixer       # Adds final newline to files if missing
+    - id: mixed-line-ending       # Detects mixed Windows/Unix line endings
+      args: [--fix=lf]
+    - id: trailing-whitespace     # Removes trailing whitespace from lines

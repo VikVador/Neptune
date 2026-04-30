@@ -1,0 +1,2 @@
+# Notebooks are undetectable by GitHub's linguist
+*.ipynb linguist-detectable=false

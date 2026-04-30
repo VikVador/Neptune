@@ -1,0 +1,64 @@
+[project]
+name = "neptune"
+version = "0.0.1"
+description = "A latent diffusion-based emulator of the Black Sea"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+
+dependencies = [
+  "azula==0.11.1",
+  "bottleneck==1.4.0",
+  "dask==2024.6.2",
+  "einops==0.8.0",
+  "h5py==3.12.1",
+  "netCDF4==1.7.0",
+  "numpy==1.26.3",
+  "scipy==1.16.0",
+  "shaggy @ git+https://github.com/VikVador/shaggy.git",
+  "torch==2.5.1",
+  "tqdm==4.66.4",
+  "wandb==0.26.1",
+  "xarray==2025.9.0",
+  "zarr==3.1.2",
+]
+
+[project.optional-dependencies]
+all = [
+  "cmocean==4.0.3",
+  "dawgz==2.6.2",
+  "ipykernel==6.29.5",
+  "jupyterlab==4.2.2",
+  "matplotlib==3.9.0",
+  "pre-commit==3.7.1",
+  "pytest==8.2.2",
+  "ruff==0.4.8",
+  "torchvision>=0.20",
+]
+
+[tool.ruff]
+line-length = 99
+exclude = ["notebooks/"]
+
+[tool.ruff.lint]
+extend-select = ["ANN", "B", "I", "UP", "W"]
+ignore = ["ANN002", "ANN003", "ANN401", "E731", "E741"]
+preview = true
+
+[tool.ruff.lint.extend-per-file-ignores]
+"__init__.py" = ["F401"]
+"test_*.py" = ["F403", "F405"]
+
+[tool.ruff.lint.isort]
+lines-between-types = 1
+relative-imports-order = "closest-to-furthest"
+section-order = ["future", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.format]
+preview = true
+
+[tool.setuptools.dynamic]
+version = {attr = "neptune.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["neptune*"]
