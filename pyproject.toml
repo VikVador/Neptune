@@ -8,7 +8,7 @@ requires-python = ">=3.10"
 
 dependencies = [
   "azula==0.11.1",
-  "bottleneck==1.4.0",
+  "bottleneck==1.6.0",
   "dask==2024.6.2",
   "einops==0.8.0",
   "h5py==3.12.1",
@@ -21,6 +21,7 @@ dependencies = [
   "wandb==0.26.1",
   "xarray==2025.9.0",
   "zarr==3.1.2",
+  "google-crc32c==1.8.0",
 ]
 
 [project.optional-dependencies]
@@ -56,6 +57,9 @@ section-order = ["future", "third-party", "first-party", "local-folder"]
 
 [tool.ruff.format]
 preview = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.setuptools.dynamic]
 version = {attr = "neptune.__version__"}
