@@ -20,35 +20,18 @@ X = DATASET_REGION["x"].stop
 C = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z
 
 
-@pytest.fixture(scope="module")
-def ds() -> NeptuneDataset:
-    return NeptuneDataset(*DATASET_DATES_TRAINING)
-
-
-@pytest.fixture(scope="module")
-def sample(ds: NeptuneDataset) -> torch.Tensor:
-    s, _ = ds[3]
-    return s
-
-
-@pytest.fixture(scope="module")
-def ds_raw() -> NeptuneDataset:
-    return NeptuneDataset(*DATASET_DATES_TRAINING, standardized=False)
-
-
-@pytest.fixture(scope="module")
-def sample_raw(ds_raw: NeptuneDataset) -> torch.Tensor:
-    s, _ = ds_raw[3]
-    return s
-
-
-def test_init_valid(ds: NeptuneDataset) -> None:
-    r"""Determines if the dataset loads the correct number of dates."""
-    expected = sorted(
-        d for d in ds.date_to_paths if DATASET_DATES_TRAINING[0] <= d <= DATASET_DATES_TRAINING[1]
+@pytest.fixture()
+def tiny_ds(monkeypatch: pytest.MonkeyPatch) -> NeptuneDataset:
+    monkeypatch.setattr(
+        "neptune.data.dataset.get_weights_state_mask",
+        lambda: torch.ones(3, 8, 8),
     )
-    assert len(ds) > 0
-    assert len(ds) == len(expected)
+    monkeypatch.setattr(
+        "neptune.data.dataset.get_weights_stats",
+        lambda: (torch.zeros(3, 1, 1), torch.ones(3, 1, 1)),
+    )
+    monkeypatch.setattr("neptune.data.dataset.generate_paths", lambda: {})
+    return NeptuneDataset("2000-01-01", "2000-12-31")
 
 
 def test_init_invalid_date() -> None:
@@ -57,47 +40,73 @@ def test_init_invalid_date() -> None:
         NeptuneDataset("01/01/1998", "01/01/2000")
 
 
-def test_standardize_3d(ds: NeptuneDataset) -> None:
+def test_standardize_3d(tiny_ds: NeptuneDataset) -> None:
     r"""Determines if standardize returns the correct shape for a (C, Y, X) tensor."""
-    x = torch.randn(C, Y, X)
-    assert ds.standardize(x).shape == (C, Y, X)
+    x = torch.randn(3, 8, 8)
+    assert tiny_ds.standardize(x).shape == (3, 8, 8)
 
 
-def test_standardize_4d(ds: NeptuneDataset) -> None:
+def test_standardize_4d(tiny_ds: NeptuneDataset) -> None:
     r"""Determines if standardize returns the correct shape for a (B, C, Y, X) tensor."""
-    x = torch.randn(4, C, Y, X)
-    assert ds.standardize(x).shape == (4, C, Y, X)
+    x = torch.randn(4, 3, 8, 8)
+    assert tiny_ds.standardize(x).shape == (4, 3, 8, 8)
 
 
-def test_unstandardize_roundtrip(ds: NeptuneDataset) -> None:
+def test_unstandardize_roundtrip(tiny_ds: NeptuneDataset) -> None:
     r"""Determines if standardize followed by unstandardize is the identity."""
-    x = torch.randn(C, Y, X)
-    assert torch.allclose(ds.unstandardize(ds.standardize(x)), x, rtol=1e-3, atol=1e-3)
+    x = torch.randn(3, 8, 8)
+    assert torch.allclose(tiny_ds.unstandardize(tiny_ds.standardize(x)), x, rtol=1e-3, atol=1e-3)
 
 
-def test_preprocess_shape(sample: torch.Tensor) -> None:
+@pytest.mark.integration
+def test_init_valid() -> None:
+    r"""Determines if the dataset loads the correct number of dates."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    expected = sorted(
+        d for d in ds.date_to_paths if DATASET_DATES_TRAINING[0] <= d <= DATASET_DATES_TRAINING[1]
+    )
+    assert len(ds) > 0
+    assert len(ds) == len(expected)
+
+
+@pytest.mark.integration
+def test_preprocess_shape() -> None:
     r"""Determines if a preprocessed sample has the expected shape (C, Y, X)."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    sample, _ = ds[3]
     assert sample.shape == (C, Y, X)
 
 
-def test_preprocess_dtype(sample: torch.Tensor) -> None:
+@pytest.mark.integration
+def test_preprocess_dtype() -> None:
     r"""Determines if a preprocessed sample has dtype float32."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    sample, _ = ds[3]
     assert sample.dtype == torch.float32
 
 
-def test_preprocess_no_nan(sample: torch.Tensor) -> None:
+@pytest.mark.integration
+def test_preprocess_no_nan() -> None:
     r"""Determines if a preprocessed sample (fill_with_nans=False) contains no NaN."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    sample, _ = ds[3]
     assert not sample.isnan().any()
 
 
-def test_preprocess_land_zero(sample: torch.Tensor) -> None:
+@pytest.mark.integration
+def test_preprocess_land_zero() -> None:
     r"""Determines if land pixels are zero when fill_with_nans is False."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    sample, _ = ds[3]
     mask = get_weights_state_mask()
     assert (sample[mask == 0] == 0).all()
 
 
-def test_preprocess_clipping(sample_raw: torch.Tensor) -> None:
+@pytest.mark.integration
+def test_preprocess_clipping() -> None:
     r"""Determines if physically clipped variables have no negative values."""
+    ds_raw = NeptuneDataset(*DATASET_DATES_TRAINING, standardized=False)
+    sample_raw, _ = ds_raw[3]
     clipped_channels = []
     ch = 0
     for var in DATASET_VARIABLES:
@@ -108,6 +117,7 @@ def test_preprocess_clipping(sample_raw: torch.Tensor) -> None:
     assert sample_raw[clipped_channels].min() >= 0
 
 
+@pytest.mark.integration
 def test_fill_with_nans() -> None:
     r"""Determines if land pixels are NaN when fill_with_nans is True."""
     ds_nan = NeptuneDataset(*DATASET_DATES_TRAINING, fill_with_nans=True)
@@ -116,6 +126,7 @@ def test_fill_with_nans() -> None:
     assert sample[mask == 0].isnan().all()
 
 
+@pytest.mark.integration
 def test_get_datasets_lengths() -> None:
     r"""Determines if train, validation, and test datasets all contain at least one sample."""
     train, val, test = get_datasets()

@@ -7,9 +7,11 @@ __all__ = [
     "get_weights_stats",
 ]
 
+import numpy as np
 import torch
 import xarray as xr
 
+from functools import cache
 from torch import Tensor
 
 from neptune.config import (
@@ -45,6 +47,38 @@ def _depth_dim(var: str) -> str:
     return "deptht"
 
 
+@cache
+def _mask_array() -> np.ndarray:
+    r"""Load and cache the ocean mask array from the zarr store."""
+    ds = xr.open_zarr(PATH_MASK)
+    try:
+        return ds.mask.isel(level=DATASET_REGION["depthu"]).values
+    finally:
+        ds.close()
+
+
+@cache
+def _stats_arrays() -> tuple[list[float], list[float]]:
+    r"""Load and cache per-channel mean and std from the statistics zarr store."""
+    ds = xr.open_zarr(PATH_STATS)
+    try:
+        means: list[float] = []
+        stds: list[float] = []
+        for var in DATASET_VARIABLES:
+            if var in DATASET_VARIABLES_SURFACE:
+                means.append(float(ds[var].sel(statistic="mean")))
+                stds.append(float(ds[var].sel(statistic="std")))
+            else:
+                depth = _depth_dim(var)
+                m = ds[var].sel(statistic="mean").isel({depth: DATASET_REGION[depth]}).values
+                s = ds[var].sel(statistic="std").isel({depth: DATASET_REGION[depth]}).values
+                means.extend(m.tolist())
+                stds.extend(s.tolist())
+        return means, stds
+    finally:
+        ds.close()
+
+
 def get_weights_mask(
     *,
     dim: int = 1,
@@ -62,11 +96,10 @@ def get_weights_mask(
     z_u = DATASET_REGION["depthu"].stop
     z_v = DATASET_REGION["depthv"].stop
     z_t = DATASET_REGION["deptht"].stop
-    assert z_u == z_v == z_t, (
-        f"ERROR - Depth slices must be identical, got depthu={z_u}, depthv={z_v}, deptht={z_t}"
-    )
+    if not (z_u == z_v == z_t):
+        raise ValueError(f"Depth slices must match: got depthu={z_u}, depthv={z_v}, deptht={z_t}")
 
-    mask = xr.open_zarr(PATH_MASK).mask.isel(level=DATASET_REGION["depthu"]).values
+    mask = _mask_array()
     return _prepare(torch.as_tensor(mask, dtype=torch.float32), dim, device)
 
 
@@ -142,19 +175,7 @@ def get_weights_stats(
         mean : Per-channel mean.
         std  : Per-channel standard deviation.
     """
-    ds_stats = xr.open_zarr(PATH_STATS)
-
-    means, stds = [], []
-    for var in DATASET_VARIABLES:
-        if var in DATASET_VARIABLES_SURFACE:
-            means.append(float(ds_stats[var].sel(statistic="mean")))
-            stds.append(float(ds_stats[var].sel(statistic="std")))
-        else:
-            depth = _depth_dim(var)
-            m = ds_stats[var].sel(statistic="mean").isel({depth: DATASET_REGION[depth]}).values
-            s = ds_stats[var].sel(statistic="std").isel({depth: DATASET_REGION[depth]}).values
-            means.extend(m.tolist())
-            stds.extend(s.tolist())
+    means, stds = _stats_arrays()
 
     mean = torch.tensor(means, dtype=torch.float32)[:, None, None]
     std = torch.tensor(stds, dtype=torch.float32)[:, None, None]

@@ -28,7 +28,7 @@ def assert_date_format(date_string: str) -> None:
 
 
 def generate_paths() -> dict[str, Sequence[str]]:
-    r"""Generate dictionnary of paths to access Black Sea simulation monthly grouped results."""
+    r"""Generate dictionary of paths to access Black Sea simulation monthly grouped results."""
 
     with open(PATH_GRID_U) as file:
         physics_data_U = ast.literal_eval(file.read())

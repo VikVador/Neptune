@@ -95,7 +95,9 @@ class NeptuneDataset(Dataset):
         Returns:
             data: Standardized tensor of the same shape.
         """
-        return (data - self.mean_tensor) / self.std_tensor
+        mean = self.mean_tensor.to(data.device, dtype=data.dtype)
+        std = self.std_tensor.to(data.device, dtype=data.dtype)
+        return (data - mean) / std
 
     def unstandardize(self, data: Tensor) -> Tensor:
         r"""Reverse the channel-wise standardization.
@@ -106,7 +108,9 @@ class NeptuneDataset(Dataset):
         Returns:
             data: Tensor in original physical units, same shape.
         """
-        return data * self.std_tensor + self.mean_tensor
+        mean = self.mean_tensor.to(data.device, dtype=data.dtype)
+        std = self.std_tensor.to(data.device, dtype=data.dtype)
+        return data * std + mean
 
     def preprocess(self, date: str) -> Tensor:
         r"""Load and stack a single day into a (C, Y, X) tensor.
@@ -117,28 +121,21 @@ class NeptuneDataset(Dataset):
         Returns:
             sample: Tensor of shape (C, Y, X).
         """
-        ds = xr.open_mfdataset(
+        with xr.open_mfdataset(
             self.date_to_paths[date],
             combine="by_coords",
             compat="override",
             coords="minimal",
             data_vars="minimal",
-        )
-
-        # Drop redundant 2D spatial coordinates
-        ds = ds.drop_vars(["nav_lat", "nav_lon"], errors="ignore")
-
-        # Select variables present in files
-        ds = ds[[v for v in DATASET_VARIABLES if v in ds]]
-
-        # Apply spatial and depth region
-        ds = ds.isel(**DATASET_REGION)
-
-        # Select the single time step
-        ds = ds.isel(time_counter=0)
-
-        # Load into memory
-        ds = ds.load()
+        ) as raw:
+            ds = raw.drop_vars(["nav_lat", "nav_lon"], errors="ignore")
+            missing = [v for v in DATASET_VARIABLES if v not in ds]
+            if missing:
+                raise KeyError(f"ERROR - Missing required variables: {missing}")
+            ds = ds[DATASET_VARIABLES]
+            ds = ds.isel(**DATASET_REGION)
+            ds = ds.isel(time_counter=0)
+            ds.load()
 
         # Unify depth dimension (depthu, depthv → deptht)
         for var, old_dim in [("uo", "depthu"), ("vo", "depthv")]:
@@ -160,7 +157,7 @@ class NeptuneDataset(Dataset):
         channels = []
         for var in DATASET_VARIABLES:
             if var not in ds:
-                continue
+                raise KeyError(f"ERROR - Missing required variable: {var}")
             data = torch.as_tensor(ds[var].values.copy(), dtype=torch.float32)
             if data.ndim == 3:
                 channels.extend(data.unbind(0))
@@ -185,8 +182,8 @@ def get_datasets(
     r"""Create train, validation and test datasets using the predefined date splits.
 
     Arguments:
-        standardized   : Forwarded to each NeptuneDataset.
-        fill_with_nans : Forwarded to each NeptuneDataset.
+        standardized   : If True, standardize each channel using precomputed statistics.
+        fill_with_nans : If True, land pixels are set to NaN instead of 0.
 
     Returns:
         train : Training dataset
