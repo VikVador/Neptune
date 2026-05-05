@@ -18,10 +18,6 @@ PATH_MAIN_SCRATCH = Path("/gpfs/scratch/acad/bsmfc/vmangele/")
 # Project (non-wiping)
 PATH_MAIN_PROJECT = Path("/gpfs/projects/acad/bsmfc/Obs/mastdb/vmangele/")
 
-# ======================================
-#             N E P T U N E
-# ======================================
-#
 # ----- Main Folders
 #
 PATH_NEP_LOCAL   = PATH_MAIN_LOCAL   / "neptune"

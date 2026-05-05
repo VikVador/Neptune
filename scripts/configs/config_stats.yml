@@ -1,0 +1,16 @@
+# ======================================
+#             N E P T U N E
+# ======================================
+compute_stats:
+  cpus      : 1
+  mem       : "8GB"
+  time      : "02:00:00"
+  account   : "bsmfc"
+  partition : "batch"
+
+aggregate_stats:
+  cpus      : 1
+  mem       : "4GB"
+  time      : "00:30:00"
+  account   : "bsmfc"
+  partition : "batch"
