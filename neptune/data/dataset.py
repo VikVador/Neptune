@@ -145,13 +145,10 @@ class NeptuneDataset(Dataset):
                 )
         ds = ds.drop_vars(["depthu", "depthv"], errors="ignore")
 
-        # Clip physical bounds (invalid values become NaN)
+        # Clip physical bounds (values outside bounds are clipped to the bound)
         for var, (lo, hi) in VARIABLES_CLIPPING.items():
             if var in ds:
-                if lo is not None:
-                    ds[var] = ds[var].where(ds[var] >= lo)
-                if hi is not None:
-                    ds[var] = ds[var].where(ds[var] <= hi)
+                ds[var] = ds[var].clip(min=lo, max=hi)
 
         # Stack all variables into channels → (C, Y, X)
         channels = []
