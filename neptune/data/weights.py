@@ -31,6 +31,8 @@ def _prepare(
     device: torch.device | str | None,
 ) -> Tensor:
     r"""Utility to prepare output tensors with the desired rank and device."""
+    if dim not in {1, 2}:
+        raise ValueError(f"ERROR - dim must be 1 or 2, got {dim!r}")
     if dim == 2:
         t = t.unsqueeze(0)
     if device is not None:

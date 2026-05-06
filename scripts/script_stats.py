@@ -205,6 +205,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     TMP_DIR.mkdir(parents=True, exist_ok=True)
+    for _stale in TMP_DIR.glob("*.pkl"):
+        _stale.unlink()
 
     compute_jobs = [compute_stats(i) for i in range(len(JOBS))]
     agg_job = job(

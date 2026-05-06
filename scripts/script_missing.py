@@ -3,7 +3,6 @@ r"""Script to fix missing/empty NetCDF samples by copying adjacent day data."""
 import argparse
 import numpy as np
 import os
-import random
 import re
 import xarray as xr
 import yaml
@@ -103,14 +102,14 @@ def fix_missing_sample(idx: int) -> None:
         idx: index into ALL_FILES.
     """
     file_path = ALL_FILES[idx]
-    offset = random.choice([-1, +1])
 
     try:
-        src_path = adjacent_path(file_path, offset)
+        src_path = adjacent_path(file_path, -1)
     except FileNotFoundError:
-        src_path = adjacent_path(file_path, -offset)
+        src_path = adjacent_path(file_path, +1)
 
-    dataset = xr.open_dataset(src_path).load()
+    with xr.open_dataset(src_path) as raw:
+        dataset = raw.load()
 
     # Shift all temporal coordinates and bounds to match the target date
     delta = np.timedelta64(parse_date(file_path) - parse_date(src_path))

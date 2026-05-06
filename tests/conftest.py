@@ -2,7 +2,7 @@ r"""Pytest configuration: integration mark and GPFS-aware auto-skip."""
 
 import pytest
 
-from neptune.config import PATH_MASK, PATH_STATS
+from neptune.config import PATH_MASK, PATH_PATHS, PATH_STATS
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -18,7 +18,7 @@ def pytest_collection_modifyitems(
     items: list[pytest.Item],
 ) -> None:
     """Auto-skip integration tests if GPFS paths are unavailable."""
-    if PATH_MASK.exists() and PATH_STATS.exists():
+    if PATH_MASK.exists() and PATH_STATS.exists() and PATH_PATHS.exists():
         return
     skip_integration = pytest.mark.skip(reason="GPFS paths unavailable")
     for item in items:
