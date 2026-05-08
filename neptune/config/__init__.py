@@ -26,6 +26,7 @@ PATH_NEP_SCRATCH = PATH_MAIN_SCRATCH / "neptune"
 
 # ----- Subfolders
 PATH_DATASETS   = PATH_NEP_PROJECT / "datasets"
+PATH_MODELS     = PATH_NEP_PROJECT / "models"
 PATH_PATHS      = PATH_NEP_PROJECT / "paths"
 
 # ----- Others
