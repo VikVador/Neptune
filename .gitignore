@@ -4,6 +4,9 @@
 logs/*.err
 logs/*.log
 
+# Scripts
+*.sh
+
 # Weight and biases & Dawgz
 wandb/
 .dawgz/
