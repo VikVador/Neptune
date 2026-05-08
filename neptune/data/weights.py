@@ -138,12 +138,14 @@ def get_weights_state_mask(
 def get_weights_loss(
     *,
     dim: int = 1,
+    scale: float = 10.0,
     device: torch.device | str | None = None,
 ) -> Tensor:
     r"""Build per-channel loss weights that compensate for depth-varying sea coverage.
 
     Arguments:
         dim    : Output rank. 1 → (C, 1, 1), 2 → (1, C, 1, 1).
+        scale  : Scaling factor for the loss weights.
         device : Target device ("cpu" or "cuda").
 
     Returns:
@@ -163,7 +165,7 @@ def get_weights_loss(
         else:
             weights.extend(weight_z.unbind(0))
 
-    return _prepare(torch.stack(weights, dim=0)[:, None, None], dim, device)
+    return _prepare(torch.stack(weights, dim=0)[:, None, None] * scale, dim, device)
 
 
 def get_weights_stats(
