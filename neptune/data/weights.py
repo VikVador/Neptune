@@ -54,7 +54,11 @@ def _mask_array() -> np.ndarray:
     r"""Load and cache the ocean mask array from the zarr store."""
     ds = xr.open_zarr(PATH_MASK)
     try:
-        return ds.mask.isel(level=DATASET_REGION["depthu"]).values
+        return ds.mask.isel(
+            longitude=DATASET_REGION["x"],
+            latitude=DATASET_REGION["y"],
+            level=DATASET_REGION["depthu"],
+        ).values
     finally:
         ds.close()
 
