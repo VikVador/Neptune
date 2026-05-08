@@ -13,9 +13,9 @@ from neptune.data.weights import (
     get_weights_stats,
 )
 
-Z = DATASET_REGION["depthu"].stop
-Y = DATASET_REGION["y"].stop
-X = DATASET_REGION["x"].stop
+X = DATASET_REGION["x"].stop - DATASET_REGION["x"].start
+Y = DATASET_REGION["y"].stop - DATASET_REGION["y"].start
+Z = DATASET_REGION["depthu"].stop - DATASET_REGION["depthu"].start
 C = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z
 
 
