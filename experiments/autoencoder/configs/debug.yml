@@ -11,8 +11,8 @@ Cluster:
   "account"       : ["bsmfc"]
   "partition"     : ["gpu"]
   "time"          : ["00:10:00"]
-  "nodes"         : [2]
-  "cpus-per-node" : [8]
+  "nodes"         : [1]
+  "cpus-per-node" : [1]
   "gpus-per-node" : [1]
   "ram-per-node"  : ["60GB"]
 
@@ -22,22 +22,23 @@ Autoencoder:
     "checkpoint_version" : [null]
     "saving"             : [false]
 
-  training:
-    "steps_update"        : [64]
-    "steps_logging"       : [2]
-    "samples_validation"  : [4]
-    "batch_size_per_step" : [8]
-    "batch_size_per_gpu"  : [1]
-    "learning_rate"       : [0.0001]
-    "num_workers"         : [2]
-    "prefetch_factor"     : [1]
-
   architecture:
     "checkpointing" : [False]
     "dropout"       : [0.05]
-    "hid_blocks"    : [[1, 1, 1, 1]]
-    "hid_channels"  : [[32, 64, 128, 256]]
-    "lat_channels"  : [64]
+    "hid_blocks"    : [[1, 1, 1]]
+    "hid_channels"  : [[32, 64, 128]]
+    "lat_channels"  : [32]
     "kernel_size"   : [3]
     "stride"        : [2]
     "ffn_factor"    : [1]
+
+  training:
+    "steps_update"        : [16]      # Number of times the model is updated
+    "steps_validation"    : [4]       # How many models updates before validation
+    "steps_logging"       : [1]       # How many models updates before logging
+    "samples_validation"  : [1]       # How many samples to use for validation
+    "batch_size_per_step" : [2]       # How many samples to use for updating the model
+    "batch_size_per_gpu"  : [1]       # How many samples to use per GPU
+    "learning_rate"       : [0.0001]  # Learning rate for the optimizer
+    "num_workers"         : [1]       # Number of workers for the dataloader
+    "prefetch_factor"     : [1]       # Number of batches to prefetch for the dataloader
