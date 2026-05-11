@@ -20,16 +20,19 @@ def setup_distributed() -> tuple[int, int, int, torch.device, bool]:
         rank = int(os.environ["RANK"])
         local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
+        use_cuda = torch.cuda.is_available()
 
         # Initialize process group (torchrun sets up env variables)
-        dist.init_process_group(backend="nccl", init_method="env://")
+        dist.init_process_group(backend="nccl" if use_cuda else "gloo", init_method="env://")
 
         # Set device for this process
-        torch.cuda.set_device(local_rank)
-        device = torch.device(f"cuda:{local_rank}")
+        if use_cuda:
+            device = torch.device(f"cuda:{local_rank}")
+            torch.cuda.set_device(local_rank)
+            torch.set_float32_matmul_precision("high")
+        else:
+            device = torch.device("cpu")
 
-        # Set matmul precision for performance on modern GPUs
-        torch.set_float32_matmul_precision("high")
         return rank, local_rank, world_size, device, True
 
     else:

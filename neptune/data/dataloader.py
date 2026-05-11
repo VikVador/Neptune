@@ -1,6 +1,6 @@
 r"""Dataloaders."""
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from typing import Any
@@ -47,7 +47,7 @@ def get_dataloaders(
     world_size: int = 1,
     is_distributed: bool = False,
     **kwargs: Any,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
+) -> tuple[DataLoader | Iterator, DataLoader | Iterator, DataLoader | Iterator]:
     r"""Build and return train, validation, and test dataloaders.
 
     Arguments:
@@ -63,9 +63,9 @@ def get_dataloaders(
         kwargs          : Forwarded to get_datasets().
 
     Returns:
-        train_loader : Training dataloader.
-        val_loader   : Validation dataloader.
-        test_loader  : Test dataloader.
+        train_loader : Training dataloader, or an infinite iterator.
+        val_loader   : Validation dataloader, or an infinite iterator.
+        test_loader  : Test dataloader, or an infinite iterator.
     """
     if infinite is None:
         infinite = [False, False, False]

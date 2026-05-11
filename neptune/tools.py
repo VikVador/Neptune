@@ -22,5 +22,10 @@ def load_configuration(path: Path) -> list[dict[str, Any]]:
     with open(path) as file:
         config = yaml.safe_load(file)
 
+    if not isinstance(config, dict):
+        raise TypeError(
+            f"ERROR - Expected a YAML mapping at the top level, got {type(config).__name__}."
+        )
+
     # Generate combinations
     return _generate_combinations(config)

@@ -5,6 +5,7 @@ import dask
 import dawgz
 import torch
 import torch.distributed as dist
+import wandb
 import yaml
 
 from shaggy.loss import AELoss
@@ -12,8 +13,6 @@ from shaggy.models.cae import create_ConvAE
 from shaggy.optimizer import SOAP, safe_gradient_step
 from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
-
-import wandb
 
 from neptune.config import PATH_MODELS
 from neptune.data import DATASET_REGION, DATASET_VARIABLES_OCEAN, DATASET_VARIABLES_SURFACE
@@ -78,10 +77,10 @@ def training(
 
     # Number of batches to yield per dataloader
     batches = [
-        steps_update * batch_size_per_step // batch_size_per_gpu,
-        samples_validation // batch_size_per_gpu,
+        max(1, (steps_update * batch_size_per_step + batch_size_per_gpu - 1) // batch_size_per_gpu),
+        max(1, (samples_validation + batch_size_per_gpu - 1) // batch_size_per_gpu),
         None,
-    ]
+     ]
 
     dataloader_training, _, _ = get_dataloaders(
         batch_size      = batch_size_per_gpu,
@@ -107,8 +106,8 @@ def training(
 
     # Initializing weighting tensors
     w_mask, w_loss = (
-        get_weights_mask(dim=2, device=device), # (1,     Z, Y, X)
-        get_weights_loss(dim=2, device=device), # (1, OUT_C, Y, X)
+        get_weights_mask(dim=2,             device=device), # (1,     Z, Y, X)
+        get_weights_loss(dim=2, scale=10.0, device=device), # (1, OUT_C, 1, 1)
     )
 
     # Model | 1 | Loading checkpoint

@@ -125,7 +125,7 @@ class NeptuneDataset(Dataset):
         mean = self.mean_tensor.to(data.device, dtype=data.dtype)
         std = self.std_tensor.to(data.device, dtype=data.dtype)
         outliers = (data > mean + n_std * std) | (data < mean - n_std * std)
-        return torch.where(outliers, mean.expand_as(data), data)
+        return torch.where(outliers, mean, data)
 
     def preprocess(self, date: str) -> Tensor:
         r"""Load and stack a single day into a (C, Y, X) tensor.
