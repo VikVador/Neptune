@@ -17,6 +17,11 @@ def setup_distributed() -> tuple[int, int, int, torch.device, bool]:
     """
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         # Running under torchrun
+        if "LOCAL_RANK" not in os.environ:
+            raise KeyError(
+                "ERROR - LOCAL_RANK not found. Ensure training is launched with torchrun."
+            )
+
         rank = int(os.environ["RANK"])
         local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])

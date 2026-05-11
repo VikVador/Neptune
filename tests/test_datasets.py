@@ -52,6 +52,20 @@ def test_standardize_4d(tiny_ds: NeptuneDataset) -> None:
     assert tiny_ds.standardize(x).shape == (4, 3, 8, 8)
 
 
+def test_replace_outliers(tiny_ds: NeptuneDataset) -> None:
+    r"""Determines if values beyond n_std are replaced by the channel mean and inliers remain unchanged."""
+    data = torch.zeros(3, 8, 8)
+    data[0, 0, 0] = 10.0  # above threshold → replaced by mean (0)
+    data[1, 0, 0] = -10.0  # below threshold → replaced by mean (0)
+    data[2, 0, 0] = 2.0  # within bounds  → unchanged
+
+    result = tiny_ds.replace_outliers(data, n_std=5.0)
+
+    assert result[0, 0, 0] == 0.0
+    assert result[1, 0, 0] == 0.0
+    assert result[2, 0, 0] == 2.0
+
+
 def test_unstandardize_roundtrip(tiny_ds: NeptuneDataset) -> None:
     r"""Determines if standardize followed by unstandardize is the identity."""
     x = torch.randn(3, 8, 8)

@@ -72,9 +72,14 @@ def get_dataloaders(
     if batches is None:
         batches = [None, None, None]
 
-    for inf, bst in zip(infinite, batches, strict=False):
-        if inf:
-            assert bst is not None, "ERROR - batches[i] must be set when infinite[i]=True."
+    if len(infinite) != 3:
+        raise ValueError(f"ERROR - infinite must have exactly 3 elements, got {len(infinite)}.")
+    if len(batches) != 3:
+        raise ValueError(f"ERROR - batches must have exactly 3 elements, got {len(batches)}.")
+
+    for inf, bst in zip(infinite, batches, strict=True):
+        if inf and bst is None:
+            raise ValueError("ERROR - batches[i] must be set when infinite[i]=True.")
 
     datasets = get_datasets(**kwargs)
 
@@ -107,7 +112,7 @@ def get_dataloaders(
 
     dataloaders = [
         infinite_dataloader(dl, bst, is_distributed) if inf else dl
-        for inf, bst, dl in zip(infinite, batches, dataloaders, strict=False)
+        for inf, bst, dl in zip(infinite, batches, dataloaders, strict=True)
     ]
 
     return tuple(dataloaders)
