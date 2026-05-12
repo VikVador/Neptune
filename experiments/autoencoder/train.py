@@ -21,7 +21,7 @@ from neptune.data import DATASET_REGION, DATASET_VARIABLES_OCEAN, DATASET_VARIAB
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_loss, get_weights_mask
 from neptune.distributed import reduce_mean, setup_distributed
-from neptune.tools import load_configuration
+from neptune.tools import generate_run_name_ae, load_configuration
 
 
 # fmt: off
@@ -41,10 +41,26 @@ def training(
     # Prevent xarray/dask deadlocks inside DataLoader workers
     dask.config.set(scheduler="synchronous")
 
+    # Constants
+    Z     = DATASET_REGION["deptht"].stop - DATASET_REGION["deptht"].start     # Depth levels
+    C     = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z  # Aggregated levels
+    IN_C  = C + Z                                                              # State = Variables + Mask
+    OUT_C = C                                                                  # State = Variables
+
     # Weights & Biases
+    run_name = generate_run_name_ae(
+        in_channels       = C,
+        hid_channels      = config_arch["hid_channels"],
+        lat_channels      = config_arch["lat_channels"],
+        hid_blocks        = config_arch["hid_blocks"],
+        stride            = config_arch["stride"],
+        previous_run_name = config_state["checkpoint_name"],
+    )
+
     if rank == 0:
         wandb.init(
             **config_wandb,
+            name=run_name,
             config={
                 "State"        : config_state,
                 "Training"     : config_training,
@@ -108,12 +124,6 @@ def training(
     # Waiting for processes to be ready (1)
     if is_distributed:
         dist.barrier()
-
-    # Constants
-    Z     = DATASET_REGION["deptht"].stop - DATASET_REGION["deptht"].start     # Depth levels
-    C     = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z  # Aggregated levels
-    IN_C  = C + Z                                                              # State = Variables + Mask
-    OUT_C = C                                                                  # State = Variables
 
     # Initializing weighting tensors
     w_mask, w_loss = (
