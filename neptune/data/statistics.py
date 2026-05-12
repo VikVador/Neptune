@@ -1,6 +1,9 @@
 r"""Online statistics utilities for dataset preprocessing."""
 
-__all__ = ["OnlineStats"]
+__all__ = [
+    "OnlineStats",
+    "clean",
+]
 
 import numpy as np
 

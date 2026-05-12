@@ -1,5 +1,28 @@
 r"""Global paths and configuration helpers."""
 
+__all__ = [
+    "SIMULATION",
+    "SIMULATION_DATA",
+    "SIMULATION_MASK",
+    "PATH_MAIN_LOCAL",
+    "PATH_MAIN_SCRATCH",
+    "PATH_MAIN_PROJECT",
+    "PATH_NEP_LOCAL",
+    "PATH_NEP_PROJECT",
+    "PATH_NEP_SCRATCH",
+    "PATH_DATASETS",
+    "PATH_MODELS",
+    "PATH_PATHS",
+    "PATH_GRID_U",
+    "PATH_GRID_V",
+    "PATH_GRID_W",
+    "PATH_GRID_T",
+    "PATH_PTRC",
+    "PATH_BTRC",
+    "PATH_STATS",
+    "PATH_MASK",
+]
+
 from pathlib import Path
 
 # fmt: off
