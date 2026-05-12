@@ -112,6 +112,21 @@ class NeptuneDataset(Dataset):
         std = self.std_tensor.to(data.device, dtype=data.dtype)
         return data * std + mean
 
+    def replace_outliers(self, data: Tensor, n_std: float = 10.0) -> Tensor:
+        r"""Replace channel-wise statistical outliers with the channel mean.
+
+        Arguments:
+            data  : Tensor of shape (C, Y, X) or (B, C, Y, X).
+            n_std : Number of standard deviations used as the outlier threshold.
+
+        Returns:
+            data: Tensor of the same shape, with outliers replaced by the channel mean.
+        """
+        mean = self.mean_tensor.to(data.device, dtype=data.dtype)
+        std = self.std_tensor.to(data.device, dtype=data.dtype)
+        outliers = (data > mean + n_std * std) | (data < mean - n_std * std)
+        return torch.where(outliers, mean, data)
+
     def preprocess(self, date: str) -> Tensor:
         r"""Load and stack a single day into a (C, Y, X) tensor.
 
@@ -161,6 +176,9 @@ class NeptuneDataset(Dataset):
             else:
                 channels.append(data)
         sample = torch.stack(channels, dim=0)
+
+        # Replace statistical outliers channel-wise with the channel mean
+        sample = self.replace_outliers(sample)
 
         # Standardize channel-wise
         if self.standardized:

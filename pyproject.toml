@@ -10,10 +10,14 @@ dependencies = [
   "azula==0.11.1",
   "bottleneck==1.6.0",
   "dask==2024.6.2",
+  "dawgz==1.0.4",
   "einops==0.8.0",
+  "google-crc32c==1.8.0",
   "h5py==3.12.1",
   "netCDF4==1.7.0",
   "numpy==1.26.3",
+  "omegaconf==2.3.0",
+  "pyyaml==6.0.2",
   "scipy==1.16.0",
   "shaggy @ git+https://github.com/VikVador/shaggy.git",
   "torch==2.5.1",
@@ -21,13 +25,11 @@ dependencies = [
   "wandb==0.26.1",
   "xarray==2025.9.0",
   "zarr==3.1.2",
-  "google-crc32c==1.8.0",
 ]
 
 [project.optional-dependencies]
 all = [
   "cmocean==4.0.3",
-  "dawgz==2.6.2",
   "ipykernel==6.29.5",
   "jupyterlab==4.2.2",
   "matplotlib==3.9.0",

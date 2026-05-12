@@ -14,9 +14,9 @@ from neptune.data import (
 from neptune.data.dataset import NeptuneDataset, get_datasets
 from neptune.data.weights import get_weights_state_mask
 
-Z = DATASET_REGION["depthu"].stop
-Y = DATASET_REGION["y"].stop
-X = DATASET_REGION["x"].stop
+X = DATASET_REGION["x"].stop - DATASET_REGION["x"].start
+Y = DATASET_REGION["y"].stop - DATASET_REGION["y"].start
+Z = DATASET_REGION["depthu"].stop - DATASET_REGION["depthu"].start
 C = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z
 
 
@@ -50,6 +50,20 @@ def test_standardize_4d(tiny_ds: NeptuneDataset) -> None:
     r"""Determines if standardize returns the correct shape for a (B, C, Y, X) tensor."""
     x = torch.randn(4, 3, 8, 8)
     assert tiny_ds.standardize(x).shape == (4, 3, 8, 8)
+
+
+def test_replace_outliers(tiny_ds: NeptuneDataset) -> None:
+    r"""Determines if values beyond n_std are replaced by the channel mean and inliers remain unchanged."""
+    data = torch.zeros(3, 8, 8)
+    data[0, 0, 0] = 10.0  # above threshold → replaced by mean (0)
+    data[1, 0, 0] = -10.0  # below threshold → replaced by mean (0)
+    data[2, 0, 0] = 2.0  # within bounds  → unchanged
+
+    result = tiny_ds.replace_outliers(data, n_std=5.0)
+
+    assert result[0, 0, 0] == 0.0
+    assert result[1, 0, 0] == 0.0
+    assert result[2, 0, 0] == 2.0
 
 
 def test_unstandardize_roundtrip(tiny_ds: NeptuneDataset) -> None:

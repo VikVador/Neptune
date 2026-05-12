@@ -21,8 +21,8 @@ DATASET_DATES_VALIDATION = ("2018-01-01", "2020-12-31")
 DATASET_DATES_TEST       = ("2021-01-01", "2023-12-31")
 
 DATASET_REGION = {
-    "x":      slice(0, 578),
-    "y":      slice(0, 258),
+    "x":      slice(2, 578),
+    "y":      slice(2, 258),
     "depthu": slice(0, 48),
     "depthv": slice(0, 48),
     "deptht": slice(0, 48),
