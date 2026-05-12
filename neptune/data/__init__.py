@@ -1,5 +1,16 @@
 r"""Information about our dataset"""
 
+__all__ = [
+    "VARIABLES_CLIPPING",
+    "DATASET_DATES_TRAINING",
+    "DATASET_DATES_VALIDATION",
+    "DATASET_DATES_TEST",
+    "DATASET_REGION",
+    "DATASET_VARIABLES_SURFACE",
+    "DATASET_VARIABLES_OCEAN",
+    "DATASET_VARIABLES",
+]
+
 # fmt: off
 #
 # ----- Preprocessing

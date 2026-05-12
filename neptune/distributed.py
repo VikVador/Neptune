@@ -1,5 +1,10 @@
 r"""Distributed training utilities."""
 
+__all__ = [
+    "reduce_mean",
+    "setup_distributed",
+]
+
 import os
 import torch
 import torch.distributed as dist

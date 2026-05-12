@@ -1,5 +1,11 @@
 r"""A collection of tools designed for training module."""
 
+__all__ = [
+    "load_configuration",
+    "generate_run_name_ae",
+    "get_wandb_hyperparameters",
+]
+
 import secrets
 import yaml
 
@@ -65,3 +71,40 @@ def generate_run_name_ae(
         name = f"{name}_{yyy}"
 
     return name
+
+
+def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
+    r"""Flatten a list of config dicts into a WandB-compatible hyperparameter dict for analysis.
+
+    Arguments:
+        configs : List of config dicts (e.g. config_training, config_arch).
+
+    Returns:
+        params : Flat dict mapping human-readable names to scalar values.
+    """
+    params = {}
+    for cfg in configs:
+        for k, v in cfg.items():
+            if k == "learning_rate":
+                params["Learning Rate"] = v
+            elif k == "batch_size_per_step":
+                params["Batch Size"] = v
+            elif k == "hid_channels":
+                params["Number of Stages"] = len(v)
+                for i, h in enumerate(v):
+                    params[f"Hidden Channels (Stage {i})"] = h
+            elif k == "hid_blocks":
+                for i, b in enumerate(v):
+                    params[f"Hidden Blocks (Stage {i})"] = b
+            elif k == "lat_channels":
+                params["Latent Channels"] = v
+            elif k == "kernel_size":
+                params["Kernel Size"] = v
+            elif k == "stride":
+                params["Stride"] = v
+            elif k == "ffn_factor":
+                params["FFN Scaling Factor"] = v
+            elif k == "dropout":
+                params["Dropout"] = v
+
+    return params
