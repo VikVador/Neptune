@@ -21,7 +21,7 @@ from neptune.data import DATASET_REGION, DATASET_VARIABLES_OCEAN, DATASET_VARIAB
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_loss, get_weights_mask
 from neptune.distributed import reduce_mean, setup_distributed
-from neptune.tools import generate_run_name_ae, load_configuration
+from neptune.tools import generate_run_name_ae, get_wandb_hyperparameters, load_configuration
 
 
 # fmt: off
@@ -62,10 +62,11 @@ def training(
             **config_wandb,
             name=run_name,
             config={
-                "State"        : config_state,
-                "Training"     : config_training,
-                "Architecture" : config_arch,
-                "Cluster"      : config_cluster,
+                "State"           : config_state,
+                "Training"        : config_training,
+                "Architecture"    : config_arch,
+                "Cluster"         : config_cluster,
+                "Hyperparameters" : get_wandb_hyperparameters([config_training, config_arch]),
             },
         )
     else:
