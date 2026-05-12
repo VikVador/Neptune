@@ -78,8 +78,7 @@ def get_dataloaders(
         raise ValueError(f"ERROR - batches must have exactly 3 elements, got {len(batches)}.")
 
     for inf, bst in zip(infinite, batches, strict=True):
-        if inf and bst is None:
-            raise ValueError("ERROR - batches[i] must be set when infinite[i]=True.")
+        assert not (inf and bst is None), "ERROR - batches[i] must be set when infinite[i]=True."
 
     datasets = get_datasets(**kwargs)
 
