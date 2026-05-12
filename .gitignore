@@ -7,6 +7,10 @@ logs/*.log
 # Scripts
 *.sh
 
+# Claude
+CLAUDE.md
+.claude/*
+
 # Weight and biases & Dawgz
 wandb/
 .dawgz/
