@@ -11,6 +11,12 @@ logs/*.log
 CLAUDE.md
 .claude/*
 
+# Notebooks
+notebooks/*.ipynb
+
+# Clusters
+cluster/*
+
 # Weight and biases & Dawgz
 wandb/
 .dawgz/
