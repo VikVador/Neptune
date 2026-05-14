@@ -12,6 +12,7 @@ __all__ = [
     "PATH_NEP_SCRATCH",
     "PATH_DATASETS",
     "PATH_MODELS",
+    "PATH_DIAGNOSTICS",
     "PATH_PATHS",
     "PATH_GRID_U",
     "PATH_GRID_V",
@@ -48,9 +49,10 @@ PATH_NEP_PROJECT = PATH_MAIN_PROJECT / "neptune"
 PATH_NEP_SCRATCH = PATH_MAIN_SCRATCH / "neptune"
 
 # ----- Subfolders
-PATH_DATASETS   = PATH_NEP_PROJECT / "datasets"
-PATH_MODELS     = PATH_NEP_PROJECT / "models"
-PATH_PATHS      = PATH_NEP_PROJECT / "paths"
+PATH_DATASETS     = PATH_NEP_PROJECT / "datasets"
+PATH_MODELS       = PATH_NEP_PROJECT / "models"
+PATH_DIAGNOSTICS  = PATH_NEP_PROJECT / "diagnostics"
+PATH_PATHS        = PATH_NEP_PROJECT / "paths"
 
 # ----- Others
 #
