@@ -122,10 +122,6 @@ def training(
         is_distributed  = is_distributed,
     )
 
-    # Waiting for processes to be ready (1)
-    if is_distributed:
-        dist.barrier()
-
     # Initializing weighting tensors
     w_mask, w_loss = (
         get_weights_mask(dim=2,              device=device), # (1,     Z, Y, X)
@@ -179,7 +175,7 @@ def training(
 
     # Waiting for processes to be ready (2)
     if is_distributed:
-        dist.barrier()
+        dist.barrier(device_ids=[local_rank] if device.type == "cuda" else None)
 
     for step, (x, _) in enumerate(dataloader_training):
 
@@ -351,7 +347,7 @@ if __name__ == "__main__":
         if nodes > 1:
             interpreter = (
                 f"torchrun --nnodes {nodes} --nproc-per-node {gpus_per_node} "
-                f"--rdzv_backend=c10d --rdzv_endpoint=$SLURMD_NODENAME:12345 "
+                f"--rdzv_backend=c10d --rdzv_endpoint=$SLURMD_NODENAME:$((20000 + SLURM_JOB_ID % 10000)) "
                 f"--rdzv_id=$SLURM_JOB_ID"
             )
         else:
