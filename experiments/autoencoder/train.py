@@ -45,8 +45,8 @@ def training(
     # Weights & Biases
     run_name = generate_run_name_ae(
         in_channels       = C,
-        hid_channels      = config_arch["hid_channels"],
         lat_channels      = config_arch["lat_channels"],
+        hid_channels      = config_arch["hid_channels"],
         hid_blocks        = config_arch["hid_blocks"],
         stride            = config_arch["stride"],
         previous_run_name = config_state["checkpoint_name"],
