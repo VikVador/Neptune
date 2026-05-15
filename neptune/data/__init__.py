@@ -53,6 +53,7 @@ DATASET_VARIABLES_OCEAN = [
     "vosaline",
     "CHL",
     "DOX",
+    "PAR",
     "PHO",
     "SIO",
     "NOS",
@@ -70,5 +71,5 @@ X = DATASET_REGION["x"].stop - DATASET_REGION["x"].start               # Longitu
 Y = DATASET_REGION["y"].stop - DATASET_REGION["y"].start               # Latitudes
 
 # Autoencoder state
-C_IN  = C + Z  # Variables + Mask
-C_OUT = C          # Variables
+C_IN  = C + Z         # Variables + Mask
+C_OUT = C             # Variables
