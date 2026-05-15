@@ -39,21 +39,21 @@ def load_configuration(path: str | Path) -> list[dict[str, Any]]:
 
 
 def generate_run_name_ae(
-    hid_channels: list[int],
+    in_channels: int,
     lat_channels: int,
+    hid_channels: list[int],
     hid_blocks: list[int],
     stride: int,
-    in_channels: int,
     previous_run_name: str | None = None,
 ) -> str:
     r"""Generate a descriptive WandB run name encoding the autoencoder architecture.
 
     Arguments:
-        hid_channels      : Hidden channels per stage; IC = hid_channels[0].
+        in_channels       : Number of physical input channels.
         lat_channels      : Number of latent channels.
-        hid_blocks        : Number of blocks per stage; ST = len(hid_blocks).
+        hid_channels      : List of hidden channels per stage.
+        hid_blocks        : List of blocks per stage
         stride            : Spatial stride per stage.
-        in_channels       : Number of physical input channels (surface + ocean × depth).
         previous_run_name : WandB name of the resumed run, if any.
 
     Returns:
@@ -61,8 +61,8 @@ def generate_run_name_ae(
     """
     ic = hid_channels[0]
     lc = lat_channels
-    st = len(hid_blocks)
-    cf = round(stride**st * in_channels / lat_channels)
+    st = len(hid_blocks) - 1
+    cf = round(stride ** (2 * st) * in_channels / lat_channels)
     xxx = secrets.token_hex(2).upper()
     name = f"CAE__ic{ic}_lc{lc}_st{st}_cf{cf}__{xxx}"
 
