@@ -5,6 +5,7 @@ import dask
 import dawgz
 import torch
 import torch.distributed as dist
+import wandb
 
 from omegaconf import OmegaConf
 from shaggy.loss import AELoss
@@ -14,8 +15,6 @@ from shaggy.tools import load as s_load
 from shaggy.tools import save as s_save
 from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
-
-import wandb
 
 from neptune.config import PATH_MODELS
 from neptune.data import C_IN, C_OUT, C
