@@ -17,7 +17,7 @@ from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from neptune.config import PATH_MODELS
-from neptune.data import DATASET_REGION, DATASET_VARIABLES_OCEAN, DATASET_VARIABLES_SURFACE
+from neptune.data import C_IN, C_OUT, C
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_loss, get_weights_mask
 from neptune.distributed import reduce_mean, setup_distributed
@@ -41,17 +41,11 @@ def training(
     # Prevent xarray/dask deadlocks inside DataLoader workers
     dask.config.set(scheduler="synchronous")
 
-    # Constants
-    Z     = DATASET_REGION["deptht"].stop - DATASET_REGION["deptht"].start     # Depth levels
-    C     = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z  # Aggregated levels
-    IN_C  = C + Z                                                              # State = Variables + Mask
-    OUT_C = C                                                                  # State = Variables
-
     # Weights & Biases
     run_name = generate_run_name_ae(
         in_channels       = C,
-        hid_channels      = config_arch["hid_channels"],
         lat_channels      = config_arch["lat_channels"],
+        hid_channels      = config_arch["hid_channels"],
         hid_blocks        = config_arch["hid_blocks"],
         stride            = config_arch["stride"],
         previous_run_name = config_state["checkpoint_name"],
@@ -122,14 +116,10 @@ def training(
         is_distributed  = is_distributed,
     )
 
-    # Waiting for processes to be ready (1)
-    if is_distributed:
-        dist.barrier()
-
     # Initializing weighting tensors
     w_mask, w_loss = (
         get_weights_mask(dim=2,              device=device), # (1,     Z, Y, X)
-        get_weights_loss(dim=2, scale=100.0, device=device), # (1, OUT_C, 1, 1)
+        get_weights_loss(dim=2, scale=100.0, device=device), # (1, C_OUT, 1, 1)
     )
 
     # Model | 1 | Loading checkpoint
@@ -140,8 +130,8 @@ def training(
     # Model | 2 | New
     else:
         model = create_ConvAE(
-            in_channels  = IN_C,
-            out_channels = OUT_C,
+            in_channels  = C_IN,
+            out_channels = C_OUT,
             **config_arch
         ).to(device)
 
@@ -179,13 +169,13 @@ def training(
 
     # Waiting for processes to be ready (2)
     if is_distributed:
-        dist.barrier()
+        dist.barrier(device_ids=[local_rank] if device.type == "cuda" else None)
 
     for step, (x, _) in enumerate(dataloader_training):
 
         # Pushing to device and concatenating mask
         x = x.to(device)
-        x = torch.cat([x, w_mask.expand(x.shape[0], -1, -1, -1)], dim=1) # (B, IN_C, Y, X)
+        x = torch.cat([x, w_mask.expand(x.shape[0], -1, -1, -1)], dim=1) # (B, C_IN, Y, X)
 
         with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
 
@@ -193,7 +183,7 @@ def training(
             _, x_hat = model(x)
 
             # Computing loss
-            loss = loss_function(x_hat, x[:, :C])
+            loss = loss_function(x_hat, x[:, :C_OUT])
 
         # Gradient accumulation
         loss              = loss / steps_gradient_accumulation
@@ -261,7 +251,7 @@ def training(
                         _, x_hat_val = model(x_val)
 
                         # Computing loss
-                        val_loss += loss_function(x_hat_val, x_val[:, :C]).item()
+                        val_loss += loss_function(x_hat_val, x_val[:, :C_OUT]).item()
 
                     # Cleaning
                     del x_val, x_hat_val
@@ -291,8 +281,8 @@ def training(
 
             # Creating checkpoint configuration
             ckpt_config = OmegaConf.create({
-                "in_channels": IN_C,
-                "out_channels": OUT_C,
+                "in_channels": C_IN,
+                "out_channels": C_OUT,
                 **config_arch
             })
 
@@ -351,7 +341,7 @@ if __name__ == "__main__":
         if nodes > 1:
             interpreter = (
                 f"torchrun --nnodes {nodes} --nproc-per-node {gpus_per_node} "
-                f"--rdzv_backend=c10d --rdzv_endpoint=$SLURMD_NODENAME:12345 "
+                f"--rdzv_backend=c10d --rdzv_endpoint=$SLURMD_NODENAME:$((20000 + SLURM_JOB_ID % 10000)) "
                 f"--rdzv_id=$SLURM_JOB_ID"
             )
         else:
