@@ -69,9 +69,7 @@ def training(
     (
         steps_update,
         steps_logging,
-        steps_validation,
         steps_saving,
-        samples_validation,
         batch_size_per_step,
         batch_size_per_gpu,
         learning_rate,
@@ -80,9 +78,7 @@ def training(
     ) = (
         config_training["steps_update"],
         config_training["steps_logging"],
-        config_training["steps_validation"],
         config_training["steps_saving"],
-        config_training["samples_validation"],
         config_training["batch_size_per_step"],
         config_training["batch_size_per_gpu"],
         config_training["learning_rate"],
@@ -91,26 +87,17 @@ def training(
     )
 
     # Number of steps to accumulate gradients before updating model parameters
-    batch_size_per_process = batch_size_per_gpu * world_size
-    steps_gradient_accumulation = max(
-        1, (batch_size_per_step + batch_size_per_process - 1) // batch_size_per_process
-    )
+    batch_size_per_process      = batch_size_per_gpu * world_size
+    steps_gradient_accumulation = max(1, (batch_size_per_step + batch_size_per_process - 1) // batch_size_per_process)
+    batches                     = [steps_update * steps_gradient_accumulation, None, None]
 
-    # Number of batches to yield per dataloader
-    n_batches_validation = max(1, (samples_validation + batch_size_per_gpu - 1) // batch_size_per_gpu)
-    batches = [
-        steps_update * steps_gradient_accumulation,
-        steps_update * n_batches_validation,
-        None,
-    ]
-
-    dataloader_training, dataloader_validation, _ = get_dataloaders(
+    dataloader_training, _, _ = get_dataloaders(
         batch_size      = batch_size_per_gpu,
         num_workers     = num_workers,
         prefetch_factor = prefetch_factor,
         batches         = batches,
-        shuffle         = [True,  True, False],
-        infinite        = [True, True, False],
+        shuffle         = [True, False, False],
+        infinite        = [True, False, False],
         rank            = rank,
         world_size      = world_size,
         is_distributed  = is_distributed,
@@ -122,12 +109,12 @@ def training(
         get_weights_loss(dim=2, scale=100.0, device=device), # (1, C_OUT, 1, 1)
     )
 
-    # Model | 1 | Loading checkpoint
+    # Model | Loading checkpoint
     if config_state["checkpoint_name"] is not None:
         ckpt_path = PATH_MODELS / config_state["checkpoint_name"]
         model     = s_load(ckpt_path, device=str(device)).train()
 
-    # Model | 2 | New
+    # Model | New
     else:
         model = create_ConvAE(
             in_channels  = C_IN,
@@ -135,20 +122,12 @@ def training(
             **config_arch
         ).to(device)
 
-    # Model | 3 | Defining if DDP or DataParallel
+    # Model | Defining if DDP or DataParallel
     if is_distributed:
-        ddp_kwargs = {
-            "device_ids": [local_rank],
-            "output_device": local_rank
-        } if device.type == "cuda" else {}
-
-        model = DDP(model, **ddp_kwargs)
-
+        ddp_kwargs = {"device_ids": [local_rank], "output_device": local_rank} if device.type == "cuda" else {}
+        model      = DDP(model, **ddp_kwargs)
     elif torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(
-            model,
-            device_ids=list(range(torch.cuda.device_count()))
-        ).to(device)
+        model = torch.nn.DataParallel(model, device_ids=list(range(torch.cuda.device_count()))).to(device)
 
     # Logging number of trainable parameters
     if rank == 0:
@@ -167,7 +146,7 @@ def training(
     loss_logging_accumulator = 0.0
     optimizer_step           = 0
 
-    # Waiting for processes to be ready (2)
+    # Waiting for processes to be ready
     if is_distributed:
         dist.barrier(device_ids=[local_rank] if device.type == "cuda" else None)
 
@@ -225,53 +204,11 @@ def training(
             # Logging
             if rank == 0:
                 wandb.log({
-                    "Training & Validation/Loss (Training)" : loss_mean,
-                    "Informations/Steps Update [-]"         : optimizer_step,
-                    "Informations/Samples Seen [-]"         : (step + 1) * batch_size_per_gpu * world_size,
-                    "Informations/Gradient Norm [-]"        : gradient_norm,
+                    "Training/Loss (Training)"       : loss_mean,
+                    "Informations/Steps Update [-]"  : optimizer_step,
+                    "Informations/Samples Seen [-]"  : (step + 1) * batch_size_per_gpu * world_size,
+                    "Informations/Gradient Norm [-]" : gradient_norm,
                 })
-
-        # Computing validation
-        if optimizer_step % steps_validation == 0 and is_last_accumulation_step and optimizer_step > 0:
-
-            # Switching to evaluation mode (dropout)
-            model.eval()
-            val_loss, n_val_batches = 0.0, 0
-
-            with torch.no_grad():
-                for x_val, _ in dataloader_validation:
-
-                    # Pushing to device and concatenating mask
-                    x_val = x_val.to(device)
-                    x_val = torch.cat([x_val, w_mask.expand(x_val.shape[0], -1, -1, -1)], dim=1)
-
-                    with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
-
-                        # Forward pass
-                        _, x_hat_val = model(x_val)
-
-                        # Computing loss
-                        val_loss += loss_function(x_hat_val, x_val[:, :C_OUT]).item()
-
-                    # Cleaning
-                    del x_val, x_hat_val
-
-                    # Dataloader is infinite, we need to manually break the loop after enough batches seen
-                    n_val_batches += 1
-                    if n_val_batches >= n_batches_validation:
-                        break
-
-            # Computing mean validation loss accross batches and processes
-            val_loss_mean = val_loss / max(1, n_val_batches)
-            if is_distributed:
-                val_loss_mean = reduce_mean(val_loss_mean, device)
-
-            # Logging results
-            if rank == 0:
-                wandb.log({"Training & Validation/Loss (Validation)": val_loss_mean})
-
-            # Switching back to training mode
-            model.train()
 
         # Saving checkpoint
         if optimizer_step % steps_saving == 0 and is_last_accumulation_step and optimizer_step > 0 and rank == 0:
@@ -280,11 +217,7 @@ def training(
             raw_model = model.module if hasattr(model, "module") else model
 
             # Creating checkpoint configuration
-            ckpt_config = OmegaConf.create({
-                "in_channels": C_IN,
-                "out_channels": C_OUT,
-                **config_arch
-            })
+            ckpt_config = OmegaConf.create({"in_channels": C_IN, "out_channels": C_OUT, **config_arch})
 
             # Saving model (overwrites previous checkpoint for this run)
             s_save(raw_model, ckpt_config, PATH_MODELS / wandb.run.name)
@@ -320,10 +253,10 @@ if __name__ == "__main__":
     config_wandb   = configs[0]["WandB"]
     config_cluster = configs[0]["Cluster"]
 
-    nodes         = config_cluster.get("nodes", 1)
-    gpus_per_node = config_cluster.get("gpus-per-node", 1)
-    cpus_per_node = config_cluster.get("cpus-per-node", 1)
-    ram_per_node  = config_cluster.get("ram-per-node", "8GB")
+    nodes         = config_cluster["nodes"]
+    gpus_per_node = config_cluster["gpus-per-node"]
+    cpus_per_node = config_cluster["cpus-per-node"]
+    ram_per_node  = config_cluster["ram-per-node"]
 
     # Local
     if args.backend == "async":
@@ -353,9 +286,9 @@ if __name__ == "__main__":
             gpus=gpus_per_node,
             cpus=cpus_per_node,
             ram=ram_per_node,
-            time=config_cluster.get("time", "00:10:00"),
-            account=config_cluster.get("account"),
-            partition=config_cluster.get("partition"),
+            time=config_cluster["time"],
+            account=config_cluster["account"],
+            partition=config_cluster["partition"],
         )
         def train(i: int) -> None:
             ae = configs[i]["Autoencoder"]

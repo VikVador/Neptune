@@ -5,13 +5,13 @@
 WandB:
     "entity"  : ["neptuneAI"]
     "project" : ["neptune-ae-debug"]
-    "mode"    : ["online"]
+    "mode"    : ["disabled"]
 
 Cluster:
   "account"       : ["bsmfc"]
   "partition"     : ["debug-gpu"]
   "time"          : ["00:10:00"]
-  "nodes"         : [2]
+  "nodes"         : [1]
   "cpus-per-node" : [8]
   "gpus-per-node" : [1]
   "ram-per-node"  : ["60GB"]
@@ -32,13 +32,11 @@ Autoencoder:
     "ffn_factor"    : [1]
 
   training:
-    "steps_update"        : [128]     # Model updates
-    "steps_saving"        : [32]      # Updates between checkpoints
-    "steps_validation"    : [16]      # Updates between validations
-    "steps_logging"       : [8]       # Updates between logs
-    "samples_validation"  : [2]       # Validation samples
-    "batch_size_per_step" : [2]       # Samples per update step
-    "batch_size_per_gpu"  : [1]       # Samples per GPU
-    "learning_rate"       : [0.0001]  # Optimizer learning rate
-    "num_workers"         : [1]       # DataLoader workers
-    "prefetch_factor"     : [1]       # Prefetched batches
+    "steps_update"        : [128]    # Model updates
+    "steps_saving"        : [32]     # Updates between checkpoints
+    "steps_logging"       : [8]      # Updates between logs
+    "batch_size_per_gpu"  : [1]      # Samples per GPU
+    "batch_size_per_step" : [2]      # Samples per update step
+    "learning_rate"       : [0.0001] # Optimizer learning rate
+    "num_workers"         : [1]      # DataLoader workers
+    "prefetch_factor"     : [1]      # Prefetched batches
