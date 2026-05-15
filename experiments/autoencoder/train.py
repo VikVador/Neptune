@@ -109,18 +109,12 @@ def training(
         get_weights_loss(dim=2, scale=100.0, device=device), # (1, C_OUT, 1, 1)
     )
 
-    # Model | Loading checkpoint
+    # Model | Loading checkpoint or new
     if config_state["checkpoint_name"] is not None:
         ckpt_path = PATH_MODELS / config_state["checkpoint_name"]
         model     = s_load(ckpt_path, device=str(device)).train()
-
-    # Model | New
     else:
-        model = create_ConvAE(
-            in_channels  = C_IN,
-            out_channels = C_OUT,
-            **config_arch
-        ).to(device)
+        model = create_ConvAE(in_channels  = C_IN, out_channels = C_OUT, **config_arch).to(device)
 
     # Model | Defining if DDP or DataParallel
     if is_distributed:
@@ -167,6 +161,10 @@ def training(
         # Gradient accumulation
         loss              = loss / steps_gradient_accumulation
         loss_accumulator += loss.item()
+
+        # Logging to console if not using WandB
+        if config_wandb["mode"] == "disabled":
+            print(f"Step {optimizer_step:6d} | Loss: {loss_accumulator:.4f}")
 
         # Only sync gradients on last accumulation step
         is_last_accumulation_step = ((step + 1) % steps_gradient_accumulation == 0)
