@@ -132,7 +132,7 @@ def training(
         })
 
     # Setting up training tools
-    optimizer                = SOAP(model.parameters(), lr=learning_rate)
+    optimizer                = SOAP(model.parameters(), lr=learning_rate, max_precond_size=128)
     scheduler                = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _: 1.0)
     scaler                   = GradScaler(enabled=True)
     loss_function            = AELoss(weights=w_loss)
