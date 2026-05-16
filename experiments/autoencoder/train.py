@@ -5,7 +5,6 @@ import dask
 import dawgz
 import torch
 import torch.distributed as dist
-import wandb
 
 from omegaconf import OmegaConf
 from shaggy.loss import AELoss
@@ -16,11 +15,14 @@ from shaggy.tools import save as s_save
 from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+import wandb
+
 from neptune.config import PATH_MODELS
 from neptune.data import C_IN, C_OUT, C
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_loss, get_weights_mask
 from neptune.distributed import reduce_mean, setup_distributed
+from neptune.schedulers import warmup_cosine_decay
 from neptune.tools import generate_run_name_ae, get_wandb_hyperparameters, load_configuration
 
 
@@ -72,18 +74,24 @@ def training(
         steps_saving,
         batch_size_per_step,
         batch_size_per_gpu,
-        learning_rate,
         num_workers,
         prefetch_factor,
+        lr_start,
+        lr_peak,
+        lr_end,
+        warmup_steps,
     ) = (
         config_training["steps_update"],
         config_training["steps_logging"],
         config_training["steps_saving"],
         config_training["batch_size_per_step"],
         config_training["batch_size_per_gpu"],
-        config_training["learning_rate"],
         config_training["num_workers"],
         config_training["prefetch_factor"],
+        config_training["learning_rate_start"],
+        config_training["learning_rate_peak"],
+        config_training["learning_rate_end"],
+        config_training["warmup_steps"],
     )
 
     # Number of steps to accumulate gradients before updating model parameters
@@ -128,13 +136,22 @@ def training(
         wandb.log({"Informations/Trainable Parameters [M]": sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6,})
 
     # Setting up training tools
-    optimizer                = SOAP(model.parameters(), lr=learning_rate, max_precond_size=128)
-    scheduler                = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _: 1.0)
+    optimizer = SOAP(model.parameters(), lr=lr_peak, max_precond_size=128)
+    scheduler = warmup_cosine_decay(
+        optimizer    = optimizer,
+        lr_start     = lr_start,
+        lr_peak      = lr_peak,
+        lr_end       = lr_end,
+        warmup_steps = warmup_steps,
+        total_steps  = steps_update,
+    )
+
     scaler                   = GradScaler(enabled=False)
     loss_function            = AELoss(weights=w_loss)
     loss_accumulator         = 0.0
     loss_logging_accumulator = 0.0
     loss_best                = float("inf")
+    gradient_norm            = float("inf")
     optimizer_step           = 0
 
     # Waiting for processes to be ready
@@ -161,7 +178,7 @@ def training(
 
         # Logging to console if not using WandB
         if config_wandb["mode"] == "disabled":
-            print(f"Step {optimizer_step:6d} | Loss: {loss_accumulator:.4f}")
+            print(f"Step {optimizer_step:6d} | Loss: {loss_accumulator:.4f} | γ: {scheduler.get_last_lr()[0]:.6f} | ∇: {gradient_norm:.4f}")
 
         # Only sync gradients on last accumulation step
         is_last_accumulation_step = ((step + 1) % steps_gradient_accumulation == 0)
@@ -199,10 +216,11 @@ def training(
             # Logging
             if rank == 0:
                 wandb.log({
-                    "Training/Loss (Training)"       : loss_mean,
-                    "Informations/Steps Update [-]"  : optimizer_step,
-                    "Informations/Samples Seen [-]"  : (step + 1) * batch_size_per_gpu * world_size,
-                    "Informations/Gradient Norm [-]" : gradient_norm,
+                    "Training/Loss"              : loss_mean,
+                    "Informations/Steps Update"  : optimizer_step,
+                    "Informations/Samples Seen"  : (step + 1) * batch_size_per_gpu * world_size,
+                    "Informations/Gradient Norm" : gradient_norm,
+                    "Informations/Learning Rate" : scheduler.get_last_lr()[0],
                 })
 
         # Saving checkpoint
