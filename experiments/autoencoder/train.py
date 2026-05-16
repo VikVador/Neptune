@@ -125,19 +125,16 @@ def training(
 
     # Logging number of trainable parameters
     if rank == 0:
-        wandb.log({
-            "Informations/Trainable Parameters [M]": sum(
-                p.numel() for p in model.parameters() if p.requires_grad
-            ) / 1e6,
-        })
+        wandb.log({"Informations/Trainable Parameters [M]": sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6,})
 
     # Setting up training tools
     optimizer                = SOAP(model.parameters(), lr=learning_rate, max_precond_size=128)
     scheduler                = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _: 1.0)
-    scaler                   = GradScaler(enabled=True)
+    scaler                   = GradScaler(enabled=False)
     loss_function            = AELoss(weights=w_loss)
     loss_accumulator         = 0.0
     loss_logging_accumulator = 0.0
+    loss_best                = float("inf")
     optimizer_step           = 0
 
     # Waiting for processes to be ready
@@ -210,15 +207,17 @@ def training(
 
         # Saving checkpoint
         if optimizer_step % steps_saving == 0 and is_last_accumulation_step and optimizer_step > 0 and rank == 0:
+            if loss_mean < loss_best:
 
-            # Extracting raw model from DDP/DataParallel wrapper if needed
-            raw_model = model.module if hasattr(model, "module") else model
+                # Extracting raw model and creating checkpoint configuration
+                raw_model   = model.module if hasattr(model, "module") else model
+                ckpt_config = OmegaConf.create({"in_channels": C_IN, "out_channels": C_OUT, **config_arch})
 
-            # Creating checkpoint configuration
-            ckpt_config = OmegaConf.create({"in_channels": C_IN, "out_channels": C_OUT, **config_arch})
+                # Saving model (overwrites previous checkpoint for this run)
+                s_save(raw_model, ckpt_config, PATH_MODELS / wandb.run.name)
 
-            # Saving model (overwrites previous checkpoint for this run)
-            s_save(raw_model, ckpt_config, PATH_MODELS / wandb.run.name)
+                # Updating best loss
+                loss_best = loss_mean
 
     # Closing run
     wandb.finish()
