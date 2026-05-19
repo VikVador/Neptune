@@ -1,0 +1,45 @@
+# ====================================
+#            N E P T U N E
+# ====================================
+
+WandB:
+    "entity"  : ["neptuneAI"]
+    "project" : ["neptune-ae-training"]
+    "mode"    : ["online"]
+
+Cluster:
+  "account"       : ["bsmfc"]
+  "partition"     : ["ia"]
+  "time"          : ["48:00:00"]
+  "nodes"         : [1]
+  "cpus-per-node" : [32]
+  "gpus-per-node" : [4]
+  "ram-per-node"  : ["240GB"]
+
+Autoencoder:
+  state:
+    "checkpoint_name"    : [null]
+    "saving"             : [true]
+
+  architecture:
+    "checkpointing" : [True]
+    "dropout"       : [0.0]
+    "hid_blocks"    : [[3, 3, 3, 3]]
+    "hid_channels"  : [[512, 512, 1024, 1024]]
+    "lat_channels"  : [128, 256]
+    "kernel_size"   : [3]
+    "stride"        : [2]
+    "ffn_factor"    : [1]
+
+  training:
+    "steps_update"        : [15000]   # Model updates
+    "steps_saving"        : [25]      # Updates between checkpoints
+    "steps_logging"       : [5]       # Updates between logs
+    "batch_size_per_gpu"  : [8]       # Samples per GPU
+    "batch_size_per_step" : [64]      # Samples per update step
+    "num_workers"         : [4]       # DataLoader workers
+    "prefetch_factor"     : [1]       # Prefetched batches
+    "learning_rate_start" : [0.00002] # LR | Start
+    "learning_rate_peak"  : [0.00008] # LR | Peak (linear warmup)
+    "learning_rate_end"   : [0.00001] # LR | End (cosine decay)
+    "warmup_steps"        : [250]     # LR | Steps for linear warmup
