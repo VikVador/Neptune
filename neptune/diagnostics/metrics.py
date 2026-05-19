@@ -39,12 +39,8 @@ def power_spectrum(
     device = u.device
 
     if mask is not None:
-        assert mask.shape == (
-            1,
-            C_in,
-            Y_in,
-            X_in,
-        ), f"Expected mask shape (1, {C_in}, {Y_in}, {X_in}), got {mask.shape}"
+        if mask.shape != (1, C_in, Y_in, X_in):
+            raise ValueError(f"Expected mask shape (1, {C_in}, {Y_in}, {X_in}), got {mask.shape}")
         u = u.masked_fill(mask.expand_as(u) == 0, 0.0)
     else:
         u = u.nan_to_num(0.0)
@@ -135,12 +131,13 @@ def compute_and_save_power_spectra(
             # Forward pass
             _, x_hat = model(x_in)
 
-            # Compute power spectra with mask applied (land → nan)
+            # Compute power spectra with mask applied (land → 0.0)
             gt_list.append( power_spectrum(x,     mask=w_state_mask).cpu())
             rec_list.append(power_spectrum(x_hat, mask=w_state_mask).cpu())
 
     # Saving results
     save_dir = PATH_DIAGNOSTICS / checkpoint_name / "power_spectra"
+    save_dir.mkdir(parents=True, exist_ok=True)
     data = {"ground_truth": torch.cat(gt_list, dim=0), "reconstruction": torch.cat(rec_list, dim=0)}
     torch.save(data, save_dir / f"power_spectra_{date_start}_{date_end}.pt")
 
@@ -197,5 +194,6 @@ def compute_and_save_rmse(
 
     # Saving results
     save_dir = PATH_DIAGNOSTICS / checkpoint_name / "rmse"
+    save_dir.mkdir(parents=True, exist_ok=True)
     data = {"rmse_standardized": torch.cat(rmse_std_list, dim=0), "rmse_physical": torch.cat(rmse_raw_list, dim=0)}
     torch.save(data, save_dir / f"rmse_{date_start}_{date_end}.pt")

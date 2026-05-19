@@ -31,6 +31,15 @@ def warmup_cosine_decay(
         scheduler : LambdaLR scheduler, to be stepped once per optimizer step.
     """
 
+    if lr_peak <= 0:
+        raise ValueError(f"lr_peak must be > 0, got {lr_peak}")
+    if total_steps <= 0:
+        raise ValueError(f"total_steps must be > 0, got {total_steps}")
+    if not (0 <= warmup_steps <= total_steps):
+        raise ValueError(
+            f"warmup_steps must be in [0, total_steps], got {warmup_steps} > {total_steps}"
+        )
+
     def _lr_lambda(step: int) -> float:
         r"""Compute the learning rate multiplier for a given optimizer step."""
         # Linear warmup: interpolate from lr_start to lr_peak

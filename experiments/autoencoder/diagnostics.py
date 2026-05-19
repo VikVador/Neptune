@@ -55,9 +55,12 @@ if __name__ == "__main__":
     config_cluster = configs["Cluster"]
 
     checkpoint_name = configs["Autoencoder"]["checkpoint_name"]
-    date_start      = configs["Evaluation"]["date_start"]
-    date_end        = configs["Evaluation"]["date_end"]
-    timestep        = configs["Evaluation"]["timestep"]
+    if not checkpoint_name:
+        raise ValueError("ERROR - Checkpoint name must be a non-empty string")
+
+    date_start = configs["Evaluation"]["date_start"]
+    date_end   = configs["Evaluation"]["date_end"]
+    timestep   = configs["Evaluation"]["timestep"]
 
     WINDOWS = _build_windows(date_start, date_end, timestep)
 

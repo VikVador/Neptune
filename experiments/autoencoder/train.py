@@ -149,6 +149,7 @@ def training(
     loss_function            = AELoss(weights=w_loss)
     loss_accumulator         = 0.0
     loss_logging_accumulator = 0.0
+    loss_mean                = float("inf")
     loss_best                = float("inf")
     gradient_norm            = float("inf")
     optimizer_step           = 0
