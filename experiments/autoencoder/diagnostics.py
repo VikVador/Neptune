@@ -6,6 +6,7 @@ import dawgz
 from datetime import date, timedelta
 
 from neptune.config import PATH_DIAGNOSTICS
+from neptune.data.tools import assert_date_format
 from neptune.diagnostics import compute_and_save_power_spectra, compute_and_save_rmse
 from neptune.tools import load_configuration
 
@@ -23,6 +24,12 @@ def _build_windows(date_start: str, date_end: str, timestep: int) -> list[tuple[
     Returns:
         windows : List of (start, end) tuples covering the full range.
     """
+
+    # Sanity checks of date formats
+    assert_date_format(date_start)
+    assert_date_format(date_end)
+
+    # Building windows
     start, end, windows = date.fromisoformat(date_start), date.fromisoformat(date_end), []
     current = start
     while current <= end:

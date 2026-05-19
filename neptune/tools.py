@@ -15,7 +15,14 @@ from typing import Any
 
 
 def load_configuration(path: str | Path) -> list[dict[str, Any]]:
-    r"""Load all combinations of parameters from a YAML configuration file."""
+    r"""Load all combinations of parameters from a YAML configuration file.
+
+    Arguments:
+        path : Path to the YAML configuration file.
+
+    Returns:
+        configs : List of dicts, one per parameter combination (Cartesian product of list-valued keys).
+    """
 
     def _generate_combinations(d: dict[str, Any]) -> list[dict[str, Any]]:
         r"""Recursively generate parameter combinations."""

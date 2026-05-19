@@ -1,4 +1,4 @@
-r"""Metric functions for evaluating autoencoder reconstruction quality."""
+r"""A collection of functions for diagnosing autoencoders."""
 
 __all__ = [
     "power_spectrum",
@@ -72,6 +72,26 @@ def power_spectrum(u: Tensor, mask: Tensor | None = None) -> Tensor:
     return spectrum
 
 
+def _setup(checkpoint_name: str) -> tuple:
+    r"""Shared initialisation for diagnostics functions.
+
+    Arguments:
+        checkpoint_name : Name of the model checkpoint directory under PATH_MODELS.
+
+    Returns:
+        device       : Torch device (cuda if available, else cpu).
+        w_mask       : 3D ocean mask  (1, Z, Y, X).
+        w_state_mask : Channel-aligned mask (1, C, Y, X).
+        model        : Loaded model in eval mode.
+    """
+    dask.config.set(scheduler="synchronous")
+    device       = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    w_mask       = get_weights_mask(dim=2,       device=device)
+    w_state_mask = get_weights_state_mask(dim=2, device=device)
+    model        = s_load(PATH_MODELS / checkpoint_name, device=str(device)).eval()
+    return device, w_mask, w_state_mask, model
+
+
 def compute_and_save_power_spectra(checkpoint_name: str, date_start: str, date_end: str) -> None:
     r"""Load the model, run inference, compute and saves power spectra.
 
@@ -81,14 +101,7 @@ def compute_and_save_power_spectra(checkpoint_name: str, date_start: str, date_e
         date_end        : End date of the subset, format 'YYYY-MM-DD'.
     """
 
-    # Prevent xarray/dask deadlocks inside DataLoader workers
-    dask.config.set(scheduler="synchronous")
-
-    # Initialization
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    w_mask  = get_weights_state_mask(dim=2, device=device)
-    w_depth = get_weights_mask(dim=2, device=device)
-    model   = s_load(PATH_MODELS / checkpoint_name, device=str(device)).eval()
+    device, w_mask, w_state_mask, model = _setup(checkpoint_name)
 
     # Loading dataset and creating DataLoader
     dataset = NeptuneDataset(
@@ -110,18 +123,19 @@ def compute_and_save_power_spectra(checkpoint_name: str, date_start: str, date_e
 
             # Pushing to device and concatenating mask
             x = x.to(device)
-            x_in = torch.cat([x, w_depth.expand(x.shape[0], -1, -1, -1)], dim=1)
+            x_in = torch.cat([x, w_mask.expand(x.shape[0], -1, -1, -1)], dim=1)
 
             # Forward pass
             _, x_hat = model(x_in)
 
             # Compute power spectra with mask applied (land → nan)
-            gt_list.append( power_spectrum(x,     mask=w_mask).cpu())
-            rec_list.append(power_spectrum(x_hat, mask=w_mask).cpu())
+            gt_list.append( power_spectrum(x,     mask=w_state_mask).cpu())
+            rec_list.append(power_spectrum(x_hat, mask=w_state_mask).cpu())
 
     # Saving results
     save_dir = PATH_DIAGNOSTICS / checkpoint_name / "power_spectra"
-    torch.save({"ground_truth": torch.cat(gt_list, dim=0), "reconstruction": torch.cat(rec_list, dim=0)}, save_dir / f"power_spectra_{date_start}_{date_end}.pt")
+    data = {"ground_truth": torch.cat(gt_list, dim=0), "reconstruction": torch.cat(rec_list, dim=0)}
+    torch.save(data, save_dir / f"power_spectra_{date_start}_{date_end}.pt")
 
 
 def compute_and_save_rmse(checkpoint_name: str, date_start: str, date_end: str) -> None:
@@ -133,21 +147,14 @@ def compute_and_save_rmse(checkpoint_name: str, date_start: str, date_end: str) 
         date_end        : End date of the subset, format 'YYYY-MM-DD'.
     """
 
-    # Prevent xarray/dask deadlocks inside DataLoader workers
-    dask.config.set(scheduler="synchronous")
-
-    # Initialization
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    w_mask  = get_weights_state_mask(dim=2, device=device)
-    w_depth = get_weights_mask(dim=2, device=device)
-    model   = s_load(PATH_MODELS / checkpoint_name, device=str(device)).eval()
+    device, w_mask, w_state_mask, model = _setup(checkpoint_name)
 
     # Loading datasets and creating dataLoaders
     dataset_std, dataset_raw = (
         NeptuneDataset(date_start, date_end, standardized=s) for s in (True, False)
     )
 
-    dataloader_std, dataloader_raw   = (
+    dataloader_std, dataloader_raw = (
         DataLoader(ds, batch_size=4, num_workers=1, pin_memory=device.type == "cuda") for ds in (dataset_std, dataset_raw)
     )
 
@@ -158,25 +165,26 @@ def compute_and_save_rmse(checkpoint_name: str, date_start: str, date_end: str) 
             # Pushing to device and concatenating mask
             x_std = x_std.to(device)
             x_raw = x_raw.to(device)
-            x_in = torch.cat([x_std, w_depth.expand(x_std.shape[0], -1, -1, -1)], dim=1)
+            x_in = torch.cat([x_std, w_mask.expand(x_std.shape[0], -1, -1, -1)], dim=1)
 
             # Forward pass
             _, x_hat = model(x_in)
 
             # Applying mask on reconstructions
-            x_hat_m = x_hat.masked_fill(w_mask.expand_as(x_hat) == 0, float("nan"))
+            x_hat_m = x_hat.masked_fill(w_state_mask.expand_as(x_hat) == 0, float("nan"))
 
             # Computing standardised RMSE
-            x_std_m  = x_std.masked_fill(w_mask.expand_as(x_std) == 0, float("nan"))
+            x_std_m  = x_std.masked_fill(w_state_mask.expand_as(x_std) == 0, float("nan"))
             rmse_std = torch.sqrt(torch.nanmean((x_std_m - x_hat_m) ** 2, dim=(2, 3)))
             rmse_std_list.append(rmse_std.cpu())
 
             # Computing physical RMSE
             x_hat_raw = dataset_std.unstandardize(x_hat_m)
-            x_raw_m   = x_raw.masked_fill(w_mask.expand_as(x_raw) == 0, float("nan"))
+            x_raw_m   = x_raw.masked_fill(w_state_mask.expand_as(x_raw) == 0, float("nan"))
             rmse_raw  = torch.sqrt(torch.nanmean((x_raw_m - x_hat_raw) ** 2, dim=(2, 3)))
             rmse_raw_list.append(rmse_raw.cpu())
 
     # Saving results
     save_dir = PATH_DIAGNOSTICS / checkpoint_name / "rmse"
-    torch.save({"rmse_standardized": torch.cat(rmse_std_list, dim=0), "rmse_physical": torch.cat(rmse_raw_list, dim=0)}, save_dir / f"rmse_{date_start}_{date_end}.pt")
+    data = {"rmse_standardized": torch.cat(rmse_std_list, dim=0), "rmse_physical": torch.cat(rmse_raw_list, dim=0)}
+    torch.save(data, save_dir / f"rmse_{date_start}_{date_end}.pt")
