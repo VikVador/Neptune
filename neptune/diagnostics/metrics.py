@@ -1,4 +1,4 @@
-r"""A collection of functions for diagnosing autoencoders."""
+r"""Metrics for diagnosing autoencoders."""
 
 __all__ = [
     "power_spectrum",
@@ -20,7 +20,10 @@ from neptune.data.weights import get_weights_mask, get_weights_state_mask
 
 # fmt: off
 #
-def power_spectrum(u: Tensor, mask: Tensor | None = None) -> Tensor:
+def power_spectrum(
+    u: Tensor,
+    mask: Tensor | None = None,
+) -> Tensor:
     r"""Compute the isotropic 2D power spectrum per channel, per batch element.
 
     Arguments:
@@ -92,7 +95,11 @@ def _setup(checkpoint_name: str) -> tuple:
     return device, w_mask, w_state_mask, model
 
 
-def compute_and_save_power_spectra(checkpoint_name: str, date_start: str, date_end: str) -> None:
+def compute_and_save_power_spectra(
+    checkpoint_name: str,
+    date_start: str,
+    date_end: str,
+) -> None:
     r"""Load the model, run inference, compute and saves power spectra.
 
     Arguments:
@@ -138,7 +145,11 @@ def compute_and_save_power_spectra(checkpoint_name: str, date_start: str, date_e
     torch.save(data, save_dir / f"power_spectra_{date_start}_{date_end}.pt")
 
 
-def compute_and_save_rmse(checkpoint_name: str, date_start: str, date_end: str) -> None:
+def compute_and_save_rmse(
+    checkpoint_name: str,
+    date_start: str,
+    date_end: str,
+) -> None:
     r"""Load the model, run inference, compute and save per-day RMSE.
 
     Arguments:

@@ -1,4 +1,4 @@
-r"""A collection of tools designed for training module."""
+r"""A collection of tools for various tasks."""
 
 __all__ = [
     "load_configuration",

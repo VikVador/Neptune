@@ -1,4 +1,4 @@
-r"""Launch an autoencoder diagnostics pipeline."""
+r"""Launch diagnostics of autoencoder."""
 
 import argparse
 import dawgz
@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 from neptune.config import PATH_DIAGNOSTICS
 from neptune.data.tools import assert_date_format
-from neptune.diagnostics import compute_and_save_power_spectra, compute_and_save_rmse
+from neptune.diagnostics.metrics import compute_and_save_power_spectra, compute_and_save_rmse
 from neptune.tools import load_configuration
 
 

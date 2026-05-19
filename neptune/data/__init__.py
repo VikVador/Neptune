@@ -9,6 +9,12 @@ __all__ = [
     "DATASET_VARIABLES_SURFACE",
     "DATASET_VARIABLES_OCEAN",
     "DATASET_VARIABLES",
+    "Z",
+    "C",
+    "X",
+    "Y",
+    "C_IN",
+    "C_OUT",
 ]
 
 # fmt: off

@@ -3,7 +3,7 @@ r"""Tests for neptune.data.weights."""
 import pytest
 import torch
 
-from neptune.data import DATASET_REGION, DATASET_VARIABLES_OCEAN, DATASET_VARIABLES_SURFACE
+from neptune.data import DATASET_VARIABLES_SURFACE, C, X, Y, Z
 from neptune.data.weights import (
     _depth_dim,
     _prepare,
@@ -12,11 +12,6 @@ from neptune.data.weights import (
     get_weights_state_mask,
     get_weights_stats,
 )
-
-X = DATASET_REGION["x"].stop - DATASET_REGION["x"].start
-Y = DATASET_REGION["y"].stop - DATASET_REGION["y"].start
-Z = DATASET_REGION["depthu"].stop - DATASET_REGION["depthu"].start
-C = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z
 
 
 @pytest.mark.integration

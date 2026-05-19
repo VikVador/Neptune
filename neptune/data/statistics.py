@@ -56,7 +56,10 @@ class OnlineStats:
         return max(float(np.sqrt(max(self.mu_sq - self.mu**2, 0.0))), _EPS)
 
 
-def clean(data: np.ndarray, var: str) -> np.ndarray:
+def clean(
+    data: np.ndarray,
+    var: str,
+) -> np.ndarray:
     r"""Apply physical clipping and quantile filtering to raw data.
 
     Arguments:
