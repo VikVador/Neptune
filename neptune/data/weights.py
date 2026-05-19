@@ -14,15 +14,8 @@ import xarray as xr
 from functools import cache
 from torch import Tensor
 
-from neptune.config import (
-    PATH_MASK,
-    PATH_STATS,
-)
-from neptune.data import (
-    DATASET_REGION,
-    DATASET_VARIABLES,
-    DATASET_VARIABLES_SURFACE,
-)
+from neptune.config import PATH_MASK, PATH_STATS
+from neptune.data import DATASET_REGION, DATASET_VARIABLES, DATASET_VARIABLES_SURFACE
 
 
 def _prepare(

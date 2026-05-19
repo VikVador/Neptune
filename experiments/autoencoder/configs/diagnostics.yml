@@ -1,0 +1,19 @@
+# ====================================
+#            N E P T U N E
+# ====================================
+
+Cluster:
+  "account"   : ["bsmfc"]
+  "partition" : ["gpu"]
+  "time"      : ["00:02:30"]
+  "cpus"      : [8]
+  "gpus"      : [1]
+  "ram"       : ["60GB"]
+
+Autoencoder:
+  "checkpoint_name" : [null]
+
+Evaluation:
+  "date_start" : ["2018-01-01"]
+  "date_end"   : ["2020-12-31"]
+  "timestep"   : [7]

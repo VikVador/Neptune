@@ -9,6 +9,8 @@ import numpy as np
 
 from neptune.data import VARIABLES_CLIPPING
 
+_EPS = 1e-8
+
 
 class OnlineStats:
     r"""Incremental mean and variance using weighted batch averaging."""
@@ -17,7 +19,6 @@ class OnlineStats:
         self.mu = None
         self.mu_sq = None
         self.count = 0
-        self.eps = 1e-8
 
     def update(self, data: np.ndarray) -> None:
         r"""Update statistics with a new batch of values (NaNs are ignored).
@@ -52,10 +53,13 @@ class OnlineStats:
     def std(self) -> float:
         if self.mu is None:
             return 1.0
-        return max(float(np.sqrt(max(self.mu_sq - self.mu**2, 0.0))), self.eps)
+        return max(float(np.sqrt(max(self.mu_sq - self.mu**2, 0.0))), _EPS)
 
 
-def clean(data: np.ndarray, var: str) -> np.ndarray:
+def clean(
+    data: np.ndarray,
+    var: str,
+) -> np.ndarray:
     r"""Apply physical clipping and quantile filtering to raw data.
 
     Arguments:
@@ -73,7 +77,7 @@ def clean(data: np.ndarray, var: str) -> np.ndarray:
 
     valid = data[~np.isnan(data)]
     if len(valid) > 0:
-        q_lo, q_hi = np.nanquantile(valid, [0.02, 0.98])
+        q_lo, q_hi = np.quantile(valid, [0.02, 0.98])
         data = np.where((data < q_lo) | (data > q_hi), np.nan, data)
 
     return data

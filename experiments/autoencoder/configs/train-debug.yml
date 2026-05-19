@@ -5,13 +5,13 @@
 WandB:
     "entity"  : ["neptuneAI"]
     "project" : ["neptune-ae-debug"]
-    "mode"    : ["online"]
+    "mode"    : ["disabled"]
 
 Cluster:
   "account"       : ["bsmfc"]
   "partition"     : ["debug-gpu"]
   "time"          : ["00:10:00"]
-  "nodes"         : [2]
+  "nodes"         : [1]
   "cpus-per-node" : [8]
   "gpus-per-node" : [1]
   "ram-per-node"  : ["60GB"]
@@ -34,11 +34,12 @@ Autoencoder:
   training:
     "steps_update"        : [128]     # Model updates
     "steps_saving"        : [32]      # Updates between checkpoints
-    "steps_validation"    : [16]      # Updates between validations
-    "steps_logging"       : [8]       # Updates between logs
-    "samples_validation"  : [2]       # Validation samples
-    "batch_size_per_step" : [2]       # Samples per update step
+    "steps_logging"       : [4]       # Updates between logs
     "batch_size_per_gpu"  : [1]       # Samples per GPU
-    "learning_rate"       : [0.0001]  # Optimizer learning rate
+    "batch_size_per_step" : [2]       # Samples per update step
     "num_workers"         : [1]       # DataLoader workers
     "prefetch_factor"     : [1]       # Prefetched batches
+    "learning_rate_start" : [0.0001]  # LR | Start
+    "learning_rate_peak"  : [0.0005]  # LR | Peak (linear warmup)
+    "learning_rate_end"   : [0.0001]  # LR | End (cosine decay)
+    "warmup_steps"        : [16]      # LR | Steps for linear warmup

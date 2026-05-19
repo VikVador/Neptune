@@ -10,7 +10,10 @@ import torch
 import torch.distributed as dist
 
 
-def reduce_mean(value: float, device: torch.device) -> float:
+def reduce_mean(
+    value: float,
+    device: torch.device,
+) -> float:
     r"""Reduce a scalar value across distributed processes by averaging."""
     t = torch.tensor(value, device=device)
     dist.all_reduce(t, op=dist.ReduceOp.AVG)

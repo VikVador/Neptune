@@ -21,14 +21,8 @@ from neptune.data import (
     DATASET_VARIABLES,
     VARIABLES_CLIPPING,
 )
-from neptune.data.tools import (
-    assert_date_format,
-    generate_paths,
-)
-from neptune.data.weights import (
-    get_weights_state_mask,
-    get_weights_stats,
-)
+from neptune.data.tools import assert_date_format, generate_paths
+from neptune.data.weights import get_weights_state_mask, get_weights_stats
 
 
 class NeptuneDataset(Dataset):
