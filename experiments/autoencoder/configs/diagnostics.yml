@@ -2,19 +2,18 @@
 #            N E P T U N E
 # ====================================
 
-WandB:
-    "entity"  : ["neptuneAI"]
-    "project" : ["neptune-ae-diagnostics"]
-    "mode"    : ["online"]
-
 Cluster:
-  "account"       : ["bsmfc"]
-  "partition"     : ["gpu"]
-  "time"          : ["00:10:00"]
-  "nodes"         : [1]
-  "cpus-per-node" : [8]
-  "gpus-per-node" : [1]
-  "ram-per-node"  : ["60GB"]
+  "account"   : ["bsmfc"]
+  "partition" : ["gpu"]
+  "time"      : ["00:05:00"]
+  "cpus"      : [8]
+  "gpus"      : [1]
+  "ram"       : ["60GB"]
 
 Autoencoder:
   "checkpoint_name" : [null]
+
+Evaluation:
+  "date_start" : ["2018-01-01"]
+  "date_end"   : ["2020-12-31"]
+  "timestep"   : [7]
