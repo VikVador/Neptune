@@ -1,6 +1,7 @@
 r"""Script to compute global mean and standard deviation of all dataset variables."""
 
 import argparse
+import dawgz
 import numpy as np
 import pickle
 import sys
@@ -8,30 +9,20 @@ import wandb
 import xarray as xr
 import yaml
 
-from dawgz import job, schedule
-from functools import partial
 from pathlib import Path
 
 from neptune.data import DATASET_DATES_TRAINING
 from neptune.data.statistics import OnlineStats, clean
 from neptune.data.tools import generate_paths
 
-TMP_DIR = Path.cwd() / "tmp"
 
-_early = argparse.ArgumentParser(add_help=False)
-_early.add_argument("--config", "-c", type=str, required=True)
-_early_args, _ = _early.parse_known_args()
-
-_cfg = yaml.safe_load((Path(__file__).parent / _early_args.config).read_text())
-JOB_CONFIG = _cfg["compute_stats"]
-AGG_JOB_CONFIG = _cfg["aggregate_stats"]
-
-
+# fmt: off
+#
 def list_dataset_variables() -> list[tuple[str, str | None, list[tuple[int, float]]]]:
     r"""Return one entry per physical variable in the dataset.
 
     Returns:
-        entries: one entry per variable.
+        entries: one entry per variable, as (var, depth_dim, levels).
     """
     paths = generate_paths()
     first_paths = next(iter(paths.values()))
@@ -60,17 +51,19 @@ def list_dataset_variables() -> list[tuple[str, str | None, list[tuple[int, floa
     return result
 
 
-JOBS = list_dataset_variables()
-
-
-@job(**JOB_CONFIG)
-def compute_stats(idx: int) -> None:
+def compute_stats(
+    var: str,
+    depth_dim: str | None,
+    levels: list[tuple[int, float]],
+) -> None:
     r"""Compute online mean and std for one variable (all levels) over all training months.
 
     Arguments:
-        idx: index into JOBS.
+        var       : name of the dataset variable.
+        depth_dim : name of the depth dimension, or None for 2D variables.
+        levels    : list of (level_index, depth_value) pairs; empty for 2D variables.
     """
-    var, depth_dim, levels = JOBS[idx]
+    tmp_dir = Path.cwd() / "tmp"
     date_start, date_end = DATASET_DATES_TRAINING
 
     wandb.init(entity="neptuneAI", project="neptune - statistics", name=var, mode="online")
@@ -78,7 +71,7 @@ def compute_stats(idx: int) -> None:
     level_depth_pairs = levels if levels else [(None, None)]
     stats_map = {lvl: OnlineStats() for lvl, _ in level_depth_pairs}
 
-    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
 
     for month, month_paths in sorted(generate_paths().items()):
         if not (date_start[:7] <= month <= date_end[:7]):
@@ -103,22 +96,22 @@ def compute_stats(idx: int) -> None:
             data = da.isel({depth_dim: lvl}).values if lvl is not None else da.values
             stats_map[lvl].update(clean(data.astype(np.float32), var))
 
-        with open(TMP_DIR / f"{var}.pkl", "wb") as f:
-            pickle.dump(
-                {
-                    "var": var,
-                    "depth_dim": depth_dim,
-                    "levels": {
-                        lvl: {
-                            "depth_val": dv,
-                            "mean": stats_map[lvl].mean,
-                            "std": stats_map[lvl].std,
-                        }
-                        for lvl, dv in level_depth_pairs
-                    },
+    with open(tmp_dir / f"{var}.pkl", "wb") as f:
+        pickle.dump(
+            {
+                "var": var,
+                "depth_dim": depth_dim,
+                "levels": {
+                    lvl: {
+                        "depth_val": dv,
+                        "mean": stats_map[lvl].mean,
+                        "std": stats_map[lvl].std,
+                    }
+                    for lvl, dv in level_depth_pairs
                 },
-                f,
-            )
+            },
+            f,
+        )
 
     wandb.log({
         "statistics": wandb.Table(
@@ -129,15 +122,16 @@ def compute_stats(idx: int) -> None:
     wandb.finish()
 
 
-def _aggregate_stats(path_output: str) -> None:
+def aggregate_stats(path_output: str) -> None:
     r"""Load all temp files and assemble the final xarray statistics dataset.
 
     Arguments:
         path_output: path to the output .zarr file.
     """
+    tmp_dir = Path.cwd() / "tmp"
     data_vars = {}
 
-    for pkl_file in TMP_DIR.glob("*.pkl"):
+    for pkl_file in tmp_dir.glob("*.pkl"):
         with open(pkl_file, "rb") as f:
             entry = pickle.load(f)
 
@@ -167,7 +161,9 @@ def _aggregate_stats(path_output: str) -> None:
     xr.Dataset(data_vars).to_zarr(path_output, mode="w")
 
 
+
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser(description="Compute global dataset statistics.")
     parser.add_argument(
         "--config",
@@ -201,18 +197,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.aggregate_only:
-        _aggregate_stats(args.path_output)
+        aggregate_stats(args.path_output)
         sys.exit(0)
 
-    TMP_DIR.mkdir(parents=True, exist_ok=True)
-    for _stale in TMP_DIR.glob("*.pkl"):
-        _stale.unlink()
+    cfg        = yaml.safe_load((Path(__file__).parent / args.config).read_text())
+    job_config = cfg["compute_stats"]
+    jobs       = list_dataset_variables()
 
-    compute_jobs = [compute_stats(i) for i in range(len(JOBS))]
-    agg_job = job(
-        partial(_aggregate_stats, args.path_output),
-        **AGG_JOB_CONFIG,
-        name="NEPTUNE_STATS_AGG",
-    )().after(*compute_jobs)
+    tmp_dir = Path.cwd() / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    for stale in tmp_dir.glob("*.pkl"):
+        stale.unlink()
 
-    schedule(agg_job, name="NEPTUNE_STATS", backend=args.backend)
+    @dawgz.job(array=len(jobs), **job_config)
+    def compute(i: int) -> None:
+        var, depth_dim, levels = jobs[i]
+        compute_stats(var, depth_dim, levels)
+
+    dawgz.schedule(compute, name="NEPTUNE-STATS", backend=args.backend, export="ALL")
