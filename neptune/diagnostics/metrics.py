@@ -3,7 +3,11 @@ r"""Metrics for diagnosing autoencoders."""
 __all__ = [
     "power_spectrum",
     "compute_and_save_power_spectra",
-    "compute_and_save_rmse",
+    "compute_and_save_se",
+    "compute_and_save_stats_mse",
+    "compute_and_save_maps",
+    "clean_se",
+    "compute_and_save_reconstructions",
 ]
 
 import dask
@@ -142,12 +146,12 @@ def compute_and_save_power_spectra(
     torch.save(data, save_dir / f"power_spectra_{date_start}_{date_end}.pt")
 
 
-def compute_and_save_rmse(
+def compute_and_save_se(
     checkpoint_name: str,
     date_start: str,
     date_end: str,
 ) -> None:
-    r"""Load the model, run inference, compute and save per-day RMSE.
+    r"""Load the model, run inference, compute and save per-pixel squared errors.
 
     Arguments:
         checkpoint_name : Name of the model checkpoint directory under PATH_MODELS.
@@ -166,14 +170,14 @@ def compute_and_save_rmse(
         DataLoader(ds, batch_size=4, num_workers=1, pin_memory=device.type == "cuda") for ds in (dataset_std, dataset_raw)
     )
 
-    rmse_std_list, rmse_raw_list = [], []
+    se_std_list, se_raw_list = [], []
     with torch.no_grad():
         for (x_std, _), (x_raw, _) in zip(dataloader_std, dataloader_raw, strict=False):
 
             # Pushing to device and concatenating mask
             x_std = x_std.to(device)
             x_raw = x_raw.to(device)
-            x_in = torch.cat([x_std, w_mask.expand(x_std.shape[0], -1, -1, -1)], dim=1)
+            x_in  = torch.cat([x_std, w_mask.expand(x_std.shape[0], -1, -1, -1)], dim=1)
 
             # Forward pass
             _, x_hat = model(x_in)
@@ -181,19 +185,204 @@ def compute_and_save_rmse(
             # Applying mask on reconstructions
             x_hat_m = x_hat.masked_fill(w_state_mask.expand_as(x_hat) == 0, float("nan"))
 
-            # Computing standardised RMSE
-            x_std_m  = x_std.masked_fill(w_state_mask.expand_as(x_std) == 0, float("nan"))
-            rmse_std = torch.sqrt(torch.nanmean((x_std_m - x_hat_m) ** 2, dim=(2, 3)))
-            rmse_std_list.append(rmse_std.cpu())
+            # Computing standardized per-pixel SE
+            x_std_m = x_std.masked_fill(w_state_mask.expand_as(x_std) == 0, float("nan"))
+            se_std_list.append((x_std_m - x_hat_m).pow(2).cpu())
 
-            # Computing physical RMSE
+            # Computing physical per-pixel SE
             x_hat_raw = dataset_std.unstandardize(x_hat_m)
             x_raw_m   = x_raw.masked_fill(w_state_mask.expand_as(x_raw) == 0, float("nan"))
-            rmse_raw  = torch.sqrt(torch.nanmean((x_raw_m - x_hat_raw) ** 2, dim=(2, 3)))
-            rmse_raw_list.append(rmse_raw.cpu())
+            se_raw_list.append((x_raw_m - x_hat_raw).pow(2).cpu())
 
     # Saving results
+    save_dir = PATH_DIAGNOSTICS / checkpoint_name / "se"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    data = {"se_standardized": torch.cat(se_std_list, dim=0), "se_physical": torch.cat(se_raw_list, dim=0)}
+    torch.save(data, save_dir / f"se_{date_start}_{date_end}.pt")
+
+
+def compute_and_save_stats_mse(checkpoint_name: str) -> None:
+    r"""Load per-pixel SE files one by one and compute per-channel MSE statistics.
+
+    Processes SE files sequentially (memory-safe) to build a (N_days, C) tensor of
+    spatially-averaged MSE values, then summarises along the time axis.
+
+    The scalar RMSE uses the correct definition sqrt(mean(MSE)) — not mean(sqrt(MSE)),
+    which would be the mean of per-day RMSEs and would differ by Jensen's inequality.
+    Std and quantiles describe the temporal distribution of per-day sqrt(MSE) values.
+
+    Arguments:
+        checkpoint_name : Name of the model checkpoint directory under PATH_MODELS.
+
+    Saves:
+        rmse_standardized.pt  and  rmse_physical.pt
+        under  PATH_DIAGNOSTICS / checkpoint_name / "rmse"
+        Each file is a dict with keys:
+            'rmse' : sqrt(mean MSE over all days),        shape (C,).
+            'std'  : Temporal std of per-day sqrt(MSE),   shape (C,).
+            'q25'  : 25th percentile of per-day sqrt(MSE), shape (C,).
+            'q50'  : Median of per-day sqrt(MSE),          shape (C,).
+            'q75'  : 75th percentile of per-day sqrt(MSE), shape (C,).
+    """
+
+    se_paths = sorted((PATH_DIAGNOSTICS / checkpoint_name / "se").glob("*.pt"))
+    mse_std_list, mse_raw_list = [], []
+    for path in se_paths:
+        d = torch.load(path, map_location="cpu")
+        mse_std_list.append(torch.nanmean(d["se_standardized"], dim=(2, 3)))  # (B, C)
+        mse_raw_list.append(torch.nanmean(d["se_physical"],     dim=(2, 3)))  # (B, C)
+
+    def _stats(mse: Tensor) -> dict:
+        r = mse.sqrt()   # (N_days, C) — per-day sqrt(MSE) for variability stats
+        return {
+            "rmse": mse.mean(0).sqrt(),   # (C,) — true RMSE = sqrt(mean MSE)
+            "std" : r.std(0),
+            "q25" : r.quantile(0.25, dim=0),
+            "q50" : r.quantile(0.50, dim=0),
+            "q75" : r.quantile(0.75, dim=0),
+        }
+
     save_dir = PATH_DIAGNOSTICS / checkpoint_name / "rmse"
     save_dir.mkdir(parents=True, exist_ok=True)
-    data = {"rmse_standardized": torch.cat(rmse_std_list, dim=0), "rmse_physical": torch.cat(rmse_raw_list, dim=0)}
-    torch.save(data, save_dir / f"rmse_{date_start}_{date_end}.pt")
+    torch.save(_stats(torch.cat(mse_std_list, dim=0)), save_dir / "rmse_standardized.pt")
+    torch.save(_stats(torch.cat(mse_raw_list, dim=0)), save_dir / "rmse_physical.pt")
+
+
+def compute_and_save_maps(checkpoint_name: str) -> None:
+    r"""Compute per-pixel RMSE and std maps using an online single-pass algorithm.
+
+    Arguments:
+        checkpoint_name : Name of the model checkpoint directory under PATH_MODELS.
+    """
+
+    se_paths = sorted((PATH_DIAGNOSTICS / checkpoint_name / "se").glob("*.pt"))
+
+    # Online accumulators: sum(SE), sum(SE²), count of valid (ocean) samples per pixel
+    sum_std,    sum_std_sq    = None, None
+    sum_raw,    sum_raw_sq    = None, None
+    count = None
+
+    for path in se_paths:
+        d      = torch.load(path, map_location="cpu")
+        se_std = d["se_standardized"]   # (B, C, Y, X)
+        se_raw = d["se_physical"]       # (B, C, Y, X)
+
+        valid      = (~torch.isnan(se_std)).sum(0).float()   # (C, Y, X)
+        se_std_0   = se_std.nan_to_num(0.0)
+        se_raw_0   = se_raw.nan_to_num(0.0)
+
+        if sum_std is None:
+            sum_std    = se_std_0.sum(0)
+            sum_std_sq = se_std_0.pow(2).sum(0)
+            sum_raw    = se_raw_0.sum(0)
+            sum_raw_sq = se_raw_0.pow(2).sum(0)
+            count      = valid
+        else:
+            sum_std    += se_std_0.sum(0)
+            sum_std_sq += se_std_0.pow(2).sum(0)
+            sum_raw    += se_raw_0.sum(0)
+            sum_raw_sq += se_raw_0.pow(2).sum(0)
+            count      += valid
+
+    n        = count.clamp(min=1)
+    land_nan = count == 0
+
+    def _maps(s: Tensor, s_sq: Tensor) -> tuple[Tensor, Tensor]:
+        mean_se = s / n
+        var_se  = (s_sq / n - mean_se.pow(2)).clamp(min=0)
+        rmse    = mean_se.clamp(min=0).sqrt()
+        std     = var_se.sqrt()
+        rmse[land_nan] = float("nan")
+        std[land_nan]  = float("nan")
+        return rmse, std
+
+    rmse_std, std_std = _maps(sum_std, sum_std_sq)
+    rmse_raw, std_raw = _maps(sum_raw, sum_raw_sq)
+
+    save_dir = PATH_DIAGNOSTICS / checkpoint_name / "maps"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "rmse_standardized": rmse_std,
+            "std_standardized" : std_std,
+            "rmse_physical"    : rmse_raw,
+            "std_physical"     : std_raw,
+        },
+        save_dir / "maps.pt",
+    )
+
+
+def clean_se(checkpoint_name: str) -> None:
+    r"""Delete all per-pixel SE files to free disk space after aggregation.
+
+    Arguments:
+        checkpoint_name : Name of the model checkpoint directory under PATH_MODELS.
+    """
+    for path in (PATH_DIAGNOSTICS / checkpoint_name / "se").glob("*.pt"):
+        path.unlink()
+
+
+def compute_and_save_reconstructions(
+    checkpoint_name: str,
+    dates: list[str],
+) -> None:
+    r"""Load the model, run inference, and save ground truths, reconstructions and dates.
+
+    Arguments:
+        checkpoint_name : Name of the model checkpoint directory under PATH_MODELS.
+        dates           : List of dates (format 'YYYY-MM-DD') to reconstruct.
+                          Only dates present in the dataset are processed; the filename
+                          reflects the first and last sorted date in the list.
+
+    Saves:
+        reconstructions_{first_date}_{last_date}.pt  under
+        PATH_DIAGNOSTICS / checkpoint_name / "reconstructions"
+        with keys:
+            'ground_truths'   : Standardized inputs with land=nan, shape (N, C, Y, X).
+            'reconstructions' : Model outputs  with land=nan,       shape (N, C, Y, X).
+            'dates'           : List of date strings,               length N.
+    """
+
+    device, w_mask, w_state_mask, model = _setup(checkpoint_name)
+
+    # Build dataset over the full range, then restrict to requested dates
+    dates_sorted  = sorted(dates)
+    dataset       = NeptuneDataset(dates_sorted[0], dates_sorted[-1], standardized=True)
+    dates_set     = set(dates)
+    dataset.dates = [d for d in dataset.dates if d in dates_set]
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=4,
+        num_workers=1,
+        pin_memory=device.type == "cuda",
+    )
+
+    gt_list, rec_list, dates_list = [], [], []
+    with torch.no_grad():
+        for x, batch_dates in dataloader:
+
+            # Pushing to device and concatenating mask
+            x    = x.to(device)
+            x_in = torch.cat([x, w_mask.expand(x.shape[0], -1, -1, -1)], dim=1)
+
+            # Forward pass
+            _, x_hat = model(x_in)
+
+            # Land pixels → nan
+            x_m     = x.masked_fill(    w_state_mask.expand_as(x)     == 0, float("nan"))
+            x_hat_m = x_hat.masked_fill(w_state_mask.expand_as(x_hat) == 0, float("nan"))
+
+            gt_list.append(x_m.cpu())
+            rec_list.append(x_hat_m.cpu())
+            dates_list.extend(list(batch_dates))
+
+    # Saving results
+    save_dir = PATH_DIAGNOSTICS / checkpoint_name / "reconstructions"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    data = {
+        "ground_truths":   torch.cat(gt_list,  dim=0),
+        "reconstructions": torch.cat(rec_list, dim=0),
+        "dates":           dates_list,
+    }
+    torch.save(data, save_dir / f"reconstructions_{dates_sorted[0]}_{dates_sorted[-1]}.pt")

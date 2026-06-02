@@ -3,17 +3,42 @@
 # ====================================
 
 Cluster:
-  "account"   : ["bsmfc"]
-  "partition" : ["gpu"]
-  "time"      : ["00:02:30"]
-  "cpus"      : [8]
-  "gpus"      : [1]
-  "ram"       : ["60GB"]
+
+  "cpu":
+    "account"   : ["bsmfc"]
+    "partition" : ["debug"]
+    "time"      : ["02:00:00"]
+    "cpus"      : [4]
+    "ram"       : ["30GB"]
+
+  "gpu":
+    "account"   : ["bsmfc"]
+    "partition" : ["gpu"]
+    "time"      : ["00:02:30"]
+    "cpus"      : [8]
+    "gpus"      : [1]
+    "ram"       : ["60GB"]
 
 Autoencoder:
-  "checkpoint_name" : [null]
+  "checkpoint_name" : [Null]
 
 Evaluation:
   "date_start" : ["2018-01-01"]
   "date_end"   : ["2020-12-31"]
   "timestep"   : [7]
+
+Reconstruction:
+  "dates" : [[
+    "2018-01-01",
+    "2018-04-01",
+    "2018-07-01",
+    "2018-10-01",
+    "2019-01-01",
+    "2019-04-01",
+    "2019-07-01",
+    "2019-10-01",
+    "2020-01-01",
+    "2020-04-01",
+    "2020-07-01",
+    "2020-10-01",
+  ]]
