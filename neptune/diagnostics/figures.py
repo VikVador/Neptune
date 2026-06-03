@@ -3,6 +3,7 @@ r"""Visualizations of autoencoders diagnostics."""
 __all__ = [
     "scale_fig_properties",
     "visualize_error_vertical",
+    "visualize_spectra",
 ]
 
 import matplotlib.pyplot as plt
@@ -12,12 +13,17 @@ import torch
 
 from matplotlib.ticker import ScalarFormatter
 
-from neptune.config import PATH_DIAGNOSTICS, PATH_EXP_AE_FIGURES
+from neptune.config import (
+    PATH_DIAGNOSTICS,
+    PATH_EXP_AE_FIGURES,
+)
 from neptune.data import (
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_OCEAN_BIO,
     DATASET_VARIABLES_OCEAN_PHY,
     DATASET_VARIABLES_SURFACE,
+    X,
+    Y,
     Z,
 )
 from neptune.diagnostics import (
@@ -31,17 +37,23 @@ from neptune.diagnostics import (
 # fmt: off
 #
 # ================================
-#
 #          LOCAL CONSTANTS
-#
 # ================================
 #
-# ========================
 # visualize_error_vertical
-# ========================
 _FIGSIZE_A        = (14, 16)
 _XLIM_STD_SURFACE = 0.08
 _XLIM_STD_VOLUME  = 0.50
+
+# visualize_spectra
+_FIGSIZE_B           = (14, 16)
+_GT_COLOR            = "#808080"                     # Ground truth line color
+_DX_KM               = 2.8                             # Simulation resolution [km/pixel] (0.025°)
+_YLIM_SURFACE        = (1e-4, 5e4)                     # Y-axis limits for surface variables
+_YLIM_OCEAN          = (1e-4, 1e4)                     # Y-axis limits for ocean variables
+_SPECTRA_DEPTHS      = [0, 25, 41]                     # Depths at which to show spectra
+_SPECTRA_WAVELENGTHS = [300, 80, 20]                   # Wavelengths at which to show errorbars
+_LINESTYLES          = ["dashed", "dotted", "dashdot"] # Spectrum line styles
 
 
 class _SciFormatter(ScalarFormatter):
@@ -62,9 +74,6 @@ def scale_fig_properties(figsize: tuple[float, float]) -> dict:
 
     Arguments:
         figsize : Target figure size (width, height) in inches.
-
-    Returns:
-        props : Copy of FIG_PROPERTIES with numerical sizes scaled.
     """
     ref_w, ref_h = FIG_PROPERTIES["figsize"]
     scale = ((figsize[0] * figsize[1]) / (ref_w * ref_h)) ** 0.5
@@ -75,8 +84,7 @@ def scale_fig_properties(figsize: tuple[float, float]) -> dict:
 
 
 def _plot_surface(ax: plt.Axes, var: str, q25: float, q50: float, q75: float, props: dict) -> None:
-    r"""Horizontal bar 0→Q50 with IQR errorbar (Q25–Q75) at the right edge."""
-
+    r"""Create a horizontal bar plot for surface variables."""
     color = CMAPS_LINE[var]
     ax.barh(0, q50, color=color, alpha=props["line_opacity"], height=0.4)
     ax.errorbar(q50, 0, xerr=[[q50 - q25], [q75 - q50]], fmt="none", color="black", capsize=6, linewidth=2, elinewidth=2)
@@ -90,8 +98,7 @@ def _plot_surface(ax: plt.Axes, var: str, q25: float, q50: float, q75: float, pr
 
 
 def _plot_volume(ax: plt.Axes, var: str, depths: np.ndarray, q25: np.ndarray, q50: np.ndarray, q75: np.ndarray, props: dict) -> None:
-    r"""Plot a volume variable as an error-vs-depth profile with Q25–Q75 shaded band."""
-
+    r"""Create an error-vs-depth plot for global variables."""
     color = CMAPS_LINE[var]
     ax.plot(q50, depths, color=color, linewidth=props["line_width"], linestyle="-")
     ax.fill_betweenx(depths, q25, q75, color=color, alpha=props["line_opacity_fill_between"])
@@ -104,18 +111,49 @@ def _plot_volume(ax: plt.Axes, var: str, depths: np.ndarray, q25: np.ndarray, q5
     _apply_sci_fmt(ax)
 
 
+def _plot_spectrum(
+    ax: plt.Axes,
+    var: str,
+    wavelengths: np.ndarray,
+    gt_list:      list[np.ndarray],
+    rec_list:     list[np.ndarray],
+    gt_q25_list:  list[np.ndarray],
+    gt_q75_list:  list[np.ndarray],
+    rec_q25_list: list[np.ndarray],
+    rec_q75_list: list[np.ndarray],
+    props: dict,
+) -> None:
+    r"""Plot ground truth and reconstruction spectra at one or more depth levels."""
+
+    color = CMAPS_LINE[var]
+    for i, (gt, rec, gt_lo, gt_hi, rec_lo, rec_hi) in enumerate(zip(gt_list, rec_list, gt_q25_list, gt_q75_list, rec_q25_list, rec_q75_list, strict=False)):
+        ls = _LINESTYLES[i % len(_LINESTYLES)]
+        ax.plot(wavelengths, gt,  color=_GT_COLOR, linewidth=props["line_width"], linestyle=ls)
+        ax.plot(wavelengths, rec, color=color,     linewidth=props["line_width"], linestyle=ls)
+        for w in _SPECTRA_WAVELENGTHS:
+            idx = int(np.argmin(np.abs(wavelengths - w)))
+            ax.errorbar(wavelengths[idx], gt[idx],  yerr=[[gt[idx] - gt_lo[idx]], [gt_hi[idx] - gt[idx]]],    fmt="none", color=_GT_COLOR, capsize=5, linewidth=2, elinewidth=2)
+            ax.errorbar(wavelengths[idx], rec[idx], yerr=[[rec[idx] - rec_lo[idx]], [rec_hi[idx] - rec[idx]]],fmt="none", color=color,     capsize=5, linewidth=2, elinewidth=2)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.invert_xaxis()
+    ax.grid(True, linestyle=":", alpha=0.75)
+    ax.tick_params(axis="x", labelsize=props["fs_x_tick"])
+    ax.tick_params(axis="y", labelsize=props["fs_y_tick"])
+
+
 def visualize_error_vertical(checkpoint_name: str) -> None:
     r"""Generate error-vs-depth figures for all variables (standardized and physical).
 
     Arguments:
-        checkpoint_name : Name of the model checkpoint (must have computed RMSE stats).
+        checkpoint_name : Name of the model checkpoint directory under PATH_MODELS.
     """
 
     props  = scale_fig_properties(_FIGSIZE_A)
     depths = np.array([float(DEPTHS[i]) for i in range(Z)])
     n_surf = len(DATASET_VARIABLES_SURFACE)
 
-    # Load per-channel RMSE statistics for both unit systems
+    # Load per-channel statistics for both unit systems
     rmse_dir  = PATH_DIAGNOSTICS / checkpoint_name / "rmse"
     stats_std = torch.load(rmse_dir / "rmse_standardized.pt", map_location="cpu", weights_only=True)
     stats_raw = torch.load(rmse_dir / "rmse_physical.pt",     map_location="cpu", weights_only=True)
@@ -181,3 +219,87 @@ def visualize_error_vertical(checkpoint_name: str) -> None:
         # Save
         fig.savefig(save_dir / f"error_vertical_{label}.png", dpi=150, bbox_inches="tight")
         plt.close(fig)
+
+
+def visualize_spectra(checkpoint_name: str) -> None:
+    r"""Generate power-spectrum figure for all variables.
+
+    Arguments:
+        checkpoint_name : Name of the model checkpoint directory under PATH_MODELS.
+    """
+
+    props  = scale_fig_properties(_FIGSIZE_B)
+    n_surf = len(DATASET_VARIABLES_SURFACE)
+
+    # Load most recent spectra file and compute quantiles over time
+    spectra_dir = PATH_DIAGNOSTICS / checkpoint_name / "power_spectra"
+    data        = torch.load(sorted(spectra_dir.glob("*.pt"))[-1], map_location="cpu", weights_only=True)
+    gt_q50  = data["ground_truth"].quantile(0.50, dim=0)   # (C, K)
+    gt_q25  = data["ground_truth"].quantile(0.25, dim=0)   # (C, K)
+    gt_q75  = data["ground_truth"].quantile(0.75, dim=0)   # (C, K)
+    rec_q50 = data["reconstruction"].quantile(0.50, dim=0) # (C, K)
+    rec_q25 = data["reconstruction"].quantile(0.25, dim=0) # (C, K)
+    rec_q75 = data["reconstruction"].quantile(0.75, dim=0) # (C, K)
+
+    K           = gt_q50.shape[-1]
+    wavelengths = min(X, Y) * _DX_KM / np.arange(1, K)
+
+    # Output directory
+    save_dir = PATH_EXP_AE_FIGURES / checkpoint_name
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, axes = plt.subplots(4, 4, figsize=_FIGSIZE_B)
+    fig.subplots_adjust(hspace=0.30, wspace=0.12)
+
+    # First row: surface variables
+    for col, var in enumerate(DATASET_VARIABLES_SURFACE):
+        ax     = axes[0][col]
+        c      = col
+        gt     = gt_q50[c, 1:].numpy()
+        rec    = rec_q50[c, 1:].numpy()
+        gt_lo  = gt_q25[c, 1:].numpy()
+        gt_hi  = gt_q75[c, 1:].numpy()
+        rec_lo = rec_q25[c, 1:].numpy()
+        rec_hi = rec_q75[c, 1:].numpy()
+        _plot_spectrum(ax, var, wavelengths, [gt], [rec], [gt_lo], [gt_hi], [rec_lo], [rec_hi], props)
+        ax.set_ylim(_YLIM_SURFACE)
+        ax.set_title(TRANSLATIONS[var], fontweight="bold", fontsize=props["fs_title"])
+        if col == 0:
+            ax.set_ylabel("Power Spectral Density", fontsize=props["fs_y_label"])
+        else:
+            ax.tick_params(labelleft=False)
+
+    # Rows 1-3: volume variables
+    volume_cells = (
+        [(1, col, var) for col, var in enumerate(DATASET_VARIABLES_OCEAN_PHY)] +
+        [(2 + i // 4, i % 4, var) for i, var in enumerate(DATASET_VARIABLES_OCEAN_BIO)]
+    )
+
+    for row, col, var in volume_cells:
+        ax           = axes[row][col]
+        ocean_idx    = DATASET_VARIABLES_OCEAN.index(var)
+        cs           = [n_surf + ocean_idx * Z + d for d in _SPECTRA_DEPTHS]
+        gt_list      = [gt_q50 [c, 1:].numpy() for c in cs]
+        rec_list     = [rec_q50[c, 1:].numpy() for c in cs]
+        gt_q25_list  = [gt_q25 [c, 1:].numpy() for c in cs]
+        gt_q75_list  = [gt_q75 [c, 1:].numpy() for c in cs]
+        rec_q25_list = [rec_q25[c, 1:].numpy() for c in cs]
+        rec_q75_list = [rec_q75[c, 1:].numpy() for c in cs]
+        _plot_spectrum(ax, var, wavelengths, gt_list, rec_list, gt_q25_list, gt_q75_list, rec_q25_list, rec_q75_list, props)
+        ax.set_ylim(_YLIM_OCEAN)
+        ax.set_title(TRANSLATIONS[var], fontweight="bold", fontsize=props["fs_title"])
+        if col == 0:
+            ax.set_ylabel("Power Spectral Density", fontsize=props["fs_y_label"])
+        else:
+            ax.tick_params(labelleft=False)
+
+    # Single centered x-label
+    fig.supxlabel(r"Wavelength $\lambda$ [km]", fontsize=props["fs_sup_x_label"], y=0.06)
+
+    # Hide unused subplots in last row
+    axes[3][2].set_visible(False)
+    axes[3][3].set_visible(False)
+
+    # Save
+    fig.savefig(save_dir / "power_spectra.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
