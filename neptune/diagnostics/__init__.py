@@ -6,6 +6,7 @@ __all__ = [
     "DEPTHS",
     "CMAPS_LINE",
     "CMAPS_FIELD",
+    "FIG_PROPERTIES",
 ]
 
 import cmocean.cm as cmo_cm
@@ -13,6 +14,20 @@ import matplotlib.cm as plt_cm
 
 # fmt: off
 #
+FIG_PROPERTIES = {
+    "figsize"                   : (14, 18), # reference figsize [in]
+    "fs_title"                  : 12,       # subplot title fontsize [pt]
+    "fs_x_label"                : 12,       # x-axis label fontsize [pt]
+    "fs_y_label"                : 12,       # y-axis label fontsize [pt]
+    "fs_x_tick"                 : 11,       # x-axis tick label fontsize [pt]
+    "fs_y_tick"                 : 11,       # y-axis tick label fontsize [pt]
+    "fs_sup_x_label"            : 14,       # figure-level supxlabel fontsize [pt]
+    "fs_sup_y_label"            : 14,       # figure-level supylabel fontsize [pt]
+    "line_width"                : 2,        # plot line width [pt]
+    "line_opacity"              : 1,        # primary fill/bar alpha
+    "line_opacity_fill_between" : 0.25,     # fill_between shading alpha
+}
+
 TRANSLATIONS = {
     "windsp"   : "Wind Speed Module",
     "tauuo"    : "Downward X-Stress",
