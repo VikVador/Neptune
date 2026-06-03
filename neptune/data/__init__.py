@@ -8,6 +8,8 @@ __all__ = [
     "DATASET_REGION",
     "DATASET_VARIABLES_SURFACE",
     "DATASET_VARIABLES_OCEAN",
+    "DATASET_VARIABLES_OCEAN_PHY",
+    "DATASET_VARIABLES_OCEAN_BIO",
     "DATASET_VARIABLES",
     "Z",
     "C",
@@ -65,17 +67,15 @@ DATASET_VARIABLES_OCEAN = [
     "NOS",
 ]
 
-DATASET_VARIABLES = \
-    DATASET_VARIABLES_SURFACE + DATASET_VARIABLES_OCEAN
+DATASET_VARIABLES_OCEAN_PHY = DATASET_VARIABLES_OCEAN[:4]
+DATASET_VARIABLES_OCEAN_BIO = DATASET_VARIABLES_OCEAN[4:]
+DATASET_VARIABLES           = DATASET_VARIABLES_SURFACE + DATASET_VARIABLES_OCEAN
 
 # ----- Dimensions
 #
-# Global dimensions
-Z = DATASET_REGION["deptht"].stop - DATASET_REGION["deptht"].start     # Depth levels
-C = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z  # Aggregated levels
-X = DATASET_REGION["x"].stop - DATASET_REGION["x"].start               # Longitudes
-Y = DATASET_REGION["y"].stop - DATASET_REGION["y"].start               # Latitudes
-
-# Autoencoder state
-C_IN  = C + Z         # Variables + Mask
-C_OUT = C             # Variables
+Z     = DATASET_REGION["deptht"].stop - DATASET_REGION["deptht"].start     # Depth levels
+C     = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z  # Aggregated levels
+X     = DATASET_REGION["x"].stop - DATASET_REGION["x"].start               # Longitudes
+Y     = DATASET_REGION["y"].stop - DATASET_REGION["y"].start               # Latitudes
+C_IN  = C + Z                                                              # State variables + Mask
+C_OUT = C                                                                  # State variables
