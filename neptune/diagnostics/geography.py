@@ -25,5 +25,5 @@ def load_grid() -> tuple[np.ndarray, np.ndarray]:
 def draw_geography(ax: plt.Axes) -> None:
     r"""Add Natural Earth coastline and rivers to a cartopy GeoAxes."""
     properties = dict(edgecolor="k", linewidth=0.5, zorder=3)
-    ax.add_feature(cfeature.COASTLINE.with_scale("10m"), **properties.values())
-    ax.add_feature(cfeature.RIVERS.with_scale("10m"), **properties.values())
+    ax.add_feature(cfeature.COASTLINE.with_scale("10m"), **properties)
+    ax.add_feature(cfeature.RIVERS.with_scale("10m"), **properties)
