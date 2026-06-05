@@ -1,13 +1,20 @@
 r"""Launch diagnostics of autoencoder."""
 
 import argparse
-import dawgz
 
 from datetime import date, timedelta
+from dawgz import after, job, schedule
 
 from neptune.config import PATH_DIAGNOSTICS
 from neptune.data.tools import assert_date_format
-from neptune.diagnostics.metrics import compute_and_save_power_spectra, compute_and_save_rmse
+from neptune.diagnostics.metrics import (
+    clean_se,
+    compute_and_save_maps,
+    compute_and_save_power_spectra,
+    compute_and_save_reconstructions,
+    compute_and_save_se,
+    compute_and_save_stats_mse,
+)
 from neptune.tools import load_configuration
 
 
@@ -50,11 +57,13 @@ if __name__ == "__main__":
         help="Path to the diagnostics .yml configuration file.",
     )
 
-    args           = parser.parse_args()
-    configs        = load_configuration(args.config)[0]
-    config_cluster = configs["Cluster"]
+    args            = parser.parse_args()
+    configs         = load_configuration(args.config)[0]
+    config_cluster_gpu = configs["Cluster"]["gpu"]
+    config_cluster_cpu = configs["Cluster"]["cpu"]
 
-    checkpoint_name = configs["Autoencoder"]["checkpoint_name"]
+    checkpoint_name      = configs["Autoencoder"]["checkpoint_name"]
+    dates_reconstruction = configs["Reconstruction"]["dates"]
     if not checkpoint_name:
         raise ValueError("ERROR - Checkpoint name must be a non-empty string")
 
@@ -65,22 +74,55 @@ if __name__ == "__main__":
     WINDOWS = _build_windows(date_start, date_end, timestep)
 
     # Checking that paths for saving diagnostics exist
-    (PATH_DIAGNOSTICS / checkpoint_name / "rmse").mkdir(parents=True, exist_ok=True)
+    (PATH_DIAGNOSTICS / checkpoint_name / "reconstructions").mkdir(parents=True, exist_ok=True)
+    (PATH_DIAGNOSTICS / checkpoint_name / "se").mkdir(parents=True, exist_ok=True)
     (PATH_DIAGNOSTICS / checkpoint_name / "power_spectra").mkdir(parents=True, exist_ok=True)
+    (PATH_DIAGNOSTICS / checkpoint_name / "rmse").mkdir(parents=True, exist_ok=True)
+    (PATH_DIAGNOSTICS / checkpoint_name / "maps").mkdir(parents=True, exist_ok=True)
 
-    @dawgz.job(array=len(WINDOWS), **config_cluster)
-    def diagnostic(i: int) -> None:
+    # ---- Step 0: compute reconstructions for specific dates (GPU, independent) --
 
-        # Get the date window for this job
+    @job(array=1, **config_cluster_gpu)
+    def reconstruct(i: int) -> None:
+        compute_and_save_reconstructions(checkpoint_name, dates_reconstruction)
+
+    # ---- Step 1: compute SE + power spectra per date window (GPU, array job) ---
+
+    @job(array=len(WINDOWS), **config_cluster_gpu)
+    def compute(i: int) -> None:
         start, end = WINDOWS[i]
-
-        # Compute and save diagnostics for this window
-        compute_and_save_rmse(checkpoint_name, start, end)
+        compute_and_save_se(checkpoint_name, start, end)
         compute_and_save_power_spectra(checkpoint_name, start, end)
 
-    dawgz.schedule(
-        diagnostic,
+    # ---- Step 2a: aggregate per-channel RMSE statistics (CPU, after all windows)
+
+    @after(compute)
+    @job(array=1, **config_cluster_cpu)
+    def aggregate_rmse(i: int) -> None:
+        compute_and_save_stats_mse(checkpoint_name)
+
+    # ---- Step 2b: compute per-pixel RMSE maps (CPU, after all windows) ---------
+
+    @after(compute)
+    @job(array=1, **config_cluster_cpu)
+    def aggregate_maps(i: int) -> None:
+        compute_and_save_maps(checkpoint_name)
+
+    # ---- Step 3: delete SE files once both aggregations are done ---------------
+
+    @after(aggregate_rmse)
+    @after(aggregate_maps)
+    @job(array=1, **config_cluster_cpu)
+    def cleanup(i: int) -> None:
+        clean_se(checkpoint_name)
+
+    schedule(
+        reconstruct,
+        compute,
+        aggregate_rmse,
+        aggregate_maps,
+        cleanup,
         name="AE-DIAG",
         backend="slurm",
-        export="ALL"
+        export="ALL",
     )

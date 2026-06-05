@@ -29,6 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 all = [
+  "cartopy==0.24.1",
   "cmocean==4.0.3",
   "ipykernel==6.29.5",
   "jupyterlab==4.2.2",

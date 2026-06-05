@@ -18,8 +18,8 @@ Cluster:
 
 Autoencoder:
   state:
-    "checkpoint_name"    : [null]
-    "saving"             : [false]
+    "checkpoint_name" : [null]
+    "saving"          : [false]
 
   architecture:
     "checkpointing" : [False]
