@@ -15,7 +15,12 @@ from functools import cache
 from torch import Tensor
 
 from neptune.config import PATH_MASK, PATH_STATS
-from neptune.data import DATASET_REGION, DATASET_VARIABLES, DATASET_VARIABLES_SURFACE
+from neptune.data import (
+    DATASET_REGION,
+    DATASET_VARIABLES,
+    DATASET_VARIABLES_OCEAN_BIO,
+    DATASET_VARIABLES_SURFACE,
+)
 
 
 def _prepare(
@@ -131,34 +136,60 @@ def get_weights_state_mask(
 def get_weights_loss(
     *,
     dim: int = 1,
-    scale: float = 1.0,
+    range: tuple[float, float],
+    depths: tuple[int, int],
     device: torch.device | str | None = None,
 ) -> Tensor:
-    r"""Build per-channel loss weights that compensate for depth-varying sea coverage.
+    r"""Build per-channel, per-location loss weights combining two components.
+
+    Weights:
+        Column-depth weight (Y, X): Shallow coastal columns receive higher weights.
+        Vertical weight (Z): Constant from the surface down to a depth index then linearly decaying.
 
     Arguments:
-        dim    : Output rank. 1 → (C, 1, 1), 2 → (1, C, 1, 1).
-        scale  : Optional multiplier for the loss weights.
+        dim    : Output rank. 1 → (C, Y, X), 2 → (1, C, Y, X).
+        range  : Interval of output weights.
+        depths : Depth-level indices at which the linear decay begins.
         device : Target device ("cpu" or "cuda").
 
     Returns:
-        weights : Tensor with one weight per channel.
+        weights : Per-channel, per-location weight tensor.
     """
+
+    range_min, range_max = range
+    dpt_phys, dpt_bio = depths
     mask = get_weights_mask()
+    mask_state = get_weights_state_mask()
+    z_dim = mask.shape[0]
 
-    sum_total = mask.sum()
-    sum_level = mask.sum(dim=(1, 2))
-    weight_z = 1.0 - sum_level / sum_total
-    weight_z = weight_z / weight_z.sum()
+    # Column-depth weight (Y, X)
+    w_col = range_min + (1.0 - mask.sum(dim=0).float() / z_dim) * (range_max - range_min)
 
-    weights = []
+    # Vertical weight (Z,)
+    def _vertical(dpt_cutoff: int) -> Tensor:
+        r"""Build the vertical weight component for a given cutoff depth index."""
+        w = torch.full((z_dim,), range_max)
+        if dpt_cutoff < z_dim - 1:
+            n_decay = z_dim - 1 - dpt_cutoff
+            decay = torch.linspace(0.0, 1.0, n_decay + 1)[1:]  # (n_decay,)
+            w[dpt_cutoff + 1 :] = range_max - decay * (range_max - range_min)
+        return w  # (Z,)
+
+    w_vert_phy = _vertical(dpt_phys)
+    w_vert_bio = _vertical(dpt_bio)
+
+    # Assembling weights
+    channels = []
     for var in DATASET_VARIABLES:
         if var in DATASET_VARIABLES_SURFACE:
-            weights.append(weight_z[0])
+            channels.append((w_col + range_max) * 0.5)
         else:
-            weights.extend(weight_z.unbind(0))
+            w_vert = w_vert_bio if var in DATASET_VARIABLES_OCEAN_BIO else w_vert_phy
+            for w_z in w_vert.unbind(0):
+                channels.append((w_col + w_z) * 0.5)
 
-    return _prepare(torch.stack(weights, dim=0)[:, None, None] * scale, dim, device)
+    weights = torch.stack(channels, dim=0) * mask_state
+    return _prepare(weights, dim, device)
 
 
 def get_weights_stats(

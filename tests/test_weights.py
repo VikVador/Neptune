@@ -3,7 +3,16 @@ r"""Tests for neptune.data.weights."""
 import pytest
 import torch
 
-from neptune.data import DATASET_VARIABLES_SURFACE, C, X, Y, Z
+from neptune.data import (
+    DATASET_VARIABLES_OCEAN,
+    DATASET_VARIABLES_OCEAN_BIO,
+    DATASET_VARIABLES_OCEAN_PHY,
+    DATASET_VARIABLES_SURFACE,
+    C,
+    X,
+    Y,
+    Z,
+)
 from neptune.data.weights import (
     _depth_dim,
     _prepare,
@@ -12,6 +21,9 @@ from neptune.data.weights import (
     get_weights_state_mask,
     get_weights_stats,
 )
+
+_RANGE = (0.5, 1.0)
+_DEPTHS = (Z - 1, 20)
 
 
 @pytest.mark.integration
@@ -58,30 +70,53 @@ def test_get_weights_state_mask_dim2() -> None:
 
 @pytest.mark.integration
 def test_get_weights_loss_shape() -> None:
-    r"""Determines if loss weights have the expected channel layout."""
-    assert get_weights_loss().shape == (C, 1, 1)
-
-
-@pytest.mark.integration
-def test_get_weights_loss_range() -> None:
-    r"""Determines if all loss weights are in [0, 1]."""
-    weights = get_weights_loss()
-    assert (weights >= 0).all() and (weights <= 1).all()
-
-
-@pytest.mark.integration
-def test_get_weights_loss_ocean_sum() -> None:
-    r"""Determines if the Z depth weights of one ocean variable sum to 1."""
-    weights = get_weights_loss()
-    n_surface = len(DATASET_VARIABLES_SURFACE)
-    ocean_weights = weights[n_surface : n_surface + Z, 0, 0]
-    assert torch.isclose(ocean_weights.sum(), torch.tensor(1.0), atol=1e-5)
+    r"""Determines if loss weights have the expected channel and spatial layout."""
+    assert get_weights_loss(range=_RANGE, depths=_DEPTHS).shape == (C, Y, X)
 
 
 @pytest.mark.integration
 def test_get_weights_loss_dim2() -> None:
     r"""Determines if dim=2 prepends a batch dimension."""
-    assert get_weights_loss(dim=2).shape == (1, C, 1, 1)
+    assert get_weights_loss(dim=2, range=_RANGE, depths=_DEPTHS).shape == (1, C, Y, X)
+
+
+@pytest.mark.integration
+def test_get_weights_loss_range() -> None:
+    r"""Determines if sea-pixel weights lie within [range_min, range_max] and land pixels are zero."""
+    range_min, range_max = _RANGE
+    weights = get_weights_loss(range=_RANGE, depths=_DEPTHS)
+    sea_mask = get_weights_state_mask().bool()
+    assert (weights[sea_mask] >= range_min - 1e-6).all() and (
+        weights[sea_mask] <= range_max + 1e-6
+    ).all()
+    assert (weights[~sea_mask] == 0.0).all()
+
+
+@pytest.mark.integration
+def test_get_weights_loss_col_depth_monotone() -> None:
+    r"""Determines if shallower sea columns receive strictly higher weights than deeper ones."""
+    col_depth = get_weights_mask().sum(dim=0)  # (Y, X)
+    weights = get_weights_loss(range=_RANGE, depths=_DEPTHS)
+
+    # Channel 0 is a surface variable: w = (w_col + range_max) / 2, varies only with col_depth.
+    w = weights[0]
+    sea = col_depth > 0
+    w_shallow = w[sea & (col_depth == col_depth[sea].min())].mean()
+    w_deep = w[sea & (col_depth == col_depth[sea].max())].mean()
+    assert w_shallow > w_deep
+
+
+@pytest.mark.integration
+def test_get_weights_loss_bio_lt_phy_deep() -> None:
+    r"""Determines if bio channels are down-weighted vs physical channels at levels past dpt_bio."""
+    n_surf = len(DATASET_VARIABLES_SURFACE)
+    deep_z = 40  # level 40 > dpt_bio=20
+    phy_idx = n_surf + DATASET_VARIABLES_OCEAN.index(DATASET_VARIABLES_OCEAN_PHY[0]) * Z + deep_z
+    bio_idx = n_surf + DATASET_VARIABLES_OCEAN.index(DATASET_VARIABLES_OCEAN_BIO[0]) * Z + deep_z
+
+    weights = get_weights_loss(range=_RANGE, depths=_DEPTHS)
+    sea = get_weights_mask()[deep_z] > 0
+    assert (weights[bio_idx][sea] < weights[phy_idx][sea]).all()
 
 
 @pytest.mark.integration
