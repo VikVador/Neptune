@@ -239,7 +239,7 @@ def visualize_error_vertical(checkpoint_name: str) -> None:
         axes[3][3].set_visible(False)
 
         # Save
-        fig.savefig(save_dir / f"error_vertical_{label}.png", dpi=150, bbox_inches="tight")
+        fig.savefig(save_dir / f"error_vertical_{label}.pdf", bbox_inches="tight")
         plt.close(fig)
 
 
@@ -324,7 +324,7 @@ def visualize_spectra(checkpoint_name: str) -> None:
     axes[3][3].set_visible(False)
 
     # Save
-    fig.savefig(save_dir / "power_spectra.png", dpi=150, bbox_inches="tight")
+    fig.savefig(save_dir / "power_spectra.pdf", bbox_inches="tight")
     plt.close(fig)
 
 
@@ -416,7 +416,7 @@ def visualize_error_maps_z(checkpoint_name: str) -> None:
 
                 save_dir = PATH_EXP_AE_FIGURES / checkpoint_name / "maps" / stat_label / "Z"
                 save_dir.mkdir(parents=True, exist_ok=True)
-                fig.savefig(save_dir / f"maps_{stat_label}_Z_{vgroup_tag}_{_UNIT_FILE[unit_label]}.png",dpi=150, bbox_inches="tight")
+                fig.savefig(save_dir / f"maps_{stat_label}_Z_{vgroup_tag}_{_UNIT_FILE[unit_label]}.pdf", bbox_inches="tight")
                 plt.close(fig)
 
 
@@ -482,7 +482,7 @@ def _visualize_error_section(checkpoint_name: str, agg_axis: int, agg_tag: str) 
                 fig.supxlabel(_STAT_LABELS[stat_label], fontsize=props["fs_sup_x_label"], y=0.045)
                 save_dir = PATH_EXP_AE_FIGURES / checkpoint_name / "maps" / stat_label / agg_tag
                 save_dir.mkdir(parents=True, exist_ok=True)
-                fig.savefig(save_dir / f"maps_{stat_label}_{agg_tag}_{vgroup_tag}_{_UNIT_FILE[unit_label]}.png", dpi=150, bbox_inches="tight")
+                fig.savefig(save_dir / f"maps_{stat_label}_{agg_tag}_{vgroup_tag}_{_UNIT_FILE[unit_label]}.pdf", bbox_inches="tight")
                 plt.close(fig)
 
 
@@ -587,5 +587,5 @@ def visualize_reconstructions(checkpoint_name: str) -> None:
                 fig.supxlabel(f"Ground Truths VS Reconstructions on {date}  (depth = {DEPTHS[depth]} [m])", fontsize=props["fs_sup_x_label"])
                 save_dir = PATH_EXP_AE_FIGURES / checkpoint_name / "reconstructions" / date / DEPTHS[depth]
                 save_dir.mkdir(parents=True, exist_ok=True)
-                fig.savefig(save_dir / f"reconstructions_{date}_{DEPTHS[depth]}_{vgroup_tag}_unscaled.png", dpi=150, bbox_inches="tight")
+                fig.savefig(save_dir / f"reconstructions_{date}_{DEPTHS[depth]}_{vgroup_tag}_unscaled.pdf", bbox_inches="tight")
                 plt.close(fig)
