@@ -21,7 +21,7 @@ from neptune.tools import load_configuration
 # fmt: off
 #
 def _build_windows(date_start: str, date_end: str, timestep: int) -> list[tuple[str, str]]:
-    r"""Build consecutive date windows of size `timestep` days.
+    r"""Build consecutive date windows of size timestep days.
 
     Arguments:
         date_start : First day of the range, format 'YYYY-MM-DD'.
