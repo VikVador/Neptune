@@ -112,8 +112,8 @@ def training(
 
     # Initializing weighting tensors
     w_mask, w_loss = (
-        get_weights_mask(dim=2,                                    device=device), # (1,     Z, Y, X)
-        get_weights_loss(dim=2, range=(0.5, 2.0), depths=(47, 37), device=device), # (1, C_OUT, Y, X)
+        get_weights_mask(dim=2,                  device=device),
+        get_weights_loss(dim=2, depths=(47, 37), device=device),
     )
 
     # Model | Loading checkpoint or new

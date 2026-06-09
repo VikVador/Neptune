@@ -3,8 +3,8 @@ r"""Spatial masks and loss weights for the Black Sea dataset."""
 __all__ = [
     "get_weights_mask",
     "get_weights_state_mask",
-    "get_weights_loss",
     "get_weights_stats",
+    "get_weights_loss",
 ]
 
 import numpy as np
@@ -133,65 +133,6 @@ def get_weights_state_mask(
     return _prepare(torch.stack(channels, dim=0), dim, device)
 
 
-def get_weights_loss(
-    *,
-    dim: int = 1,
-    range: tuple[float, float],
-    depths: tuple[int, int],
-    device: torch.device | str | None = None,
-) -> Tensor:
-    r"""Build per-channel, per-location loss weights combining two components.
-
-    Weights:
-        Column-depth weight (Y, X): Shallow coastal columns receive higher weights.
-        Vertical weight (Z): Constant from the surface down to a depth index then linearly decaying.
-
-    Arguments:
-        dim    : Output rank. 1 → (C, Y, X), 2 → (1, C, Y, X).
-        range  : Interval of output weights.
-        depths : Depth-level indices at which the linear decay begins.
-        device : Target device ("cpu" or "cuda").
-
-    Returns:
-        weights : Per-channel, per-location weight tensor.
-    """
-
-    range_min, range_max = range
-    dpt_phys, dpt_bio = depths
-    mask = get_weights_mask()
-    mask_state = get_weights_state_mask()
-    z_dim = mask.shape[0]
-
-    # Column-depth weight (Y, X)
-    w_col = range_min + (1.0 - mask.sum(dim=0).float() / z_dim) * (range_max - range_min)
-
-    # Vertical weight (Z,)
-    def _vertical(dpt_cutoff: int) -> Tensor:
-        r"""Build the vertical weight component for a given cutoff depth index."""
-        w = torch.full((z_dim,), range_max)
-        if dpt_cutoff < z_dim - 1:
-            n_decay = z_dim - 1 - dpt_cutoff
-            decay = torch.linspace(0.0, 1.0, n_decay + 1)[1:]  # (n_decay,)
-            w[dpt_cutoff + 1 :] = range_max - decay * (range_max - range_min)
-        return w  # (Z,)
-
-    w_vert_phy = _vertical(dpt_phys)
-    w_vert_bio = _vertical(dpt_bio)
-
-    # Assembling weights
-    channels = []
-    for var in DATASET_VARIABLES:
-        if var in DATASET_VARIABLES_SURFACE:
-            channels.append((w_col + range_max) * 0.5)
-        else:
-            w_vert = w_vert_bio if var in DATASET_VARIABLES_OCEAN_BIO else w_vert_phy
-            for w_z in w_vert.unbind(0):
-                channels.append((w_col + w_z) * 0.5)
-
-    weights = torch.stack(channels, dim=0) * mask_state
-    return _prepare(weights, dim, device)
-
-
 def get_weights_stats(
     *,
     dim: int = 1,
@@ -212,3 +153,55 @@ def get_weights_stats(
     mean = torch.tensor(means, dtype=torch.float32)[:, None, None]
     std = torch.tensor(stds, dtype=torch.float32)[:, None, None]
     return _prepare(mean, dim, device), _prepare(std, dim, device)
+
+
+def get_weights_loss(
+    *,
+    dim: int = 1,
+    depths: tuple[int, int],
+    w_min: float = 0.1,
+    scaling: float = 100.0,
+    device: torch.device | str | None = None,
+) -> Tensor:
+    r"""Build per-channel, per-location loss weights with equal per-column contribution.
+
+    Arguments:
+        dim     : Output rank. 1 → (C, Y, X), 2 → (1, C, Y, X).
+        depths  : Level indices at which the linear decay begins for ocean variables.
+        w_min   : Minimum (unnormalised) weight at the deepest level of the decay zone.
+        scaling : Global multiplier applied to the final weight tensor.
+        device  : Target device ("cpu" or "cuda").
+
+    Returns:
+        weights : Per-channel, per-location weight tensor. Land pixels are zero.
+    """
+
+    dpt_phys, dpt_bio = depths
+
+    mask = get_weights_mask()
+    z_dim = mask.shape[0]
+    col_depth = mask.sum(dim=0)
+
+    def _column_weights(d_cutoff: int) -> Tensor:
+        r"""Normalised per-column vertical weights (sum_z = 1)."""
+        n_decay = (col_depth - 1 - d_cutoff).clamp(min=0).float()
+        z_idx = torch.arange(z_dim, dtype=torch.float32).view(z_dim, 1, 1)
+        z_above = (z_idx - d_cutoff).clamp(min=0)
+        t = torch.where(n_decay > 0, z_above / n_decay.unsqueeze(0), torch.zeros_like(z_above))
+        w_shape = (1.0 - (1.0 - w_min) * t.clamp(max=1.0)) * mask
+        col_sum = w_shape.sum(dim=0, keepdim=True).clamp(min=1e-8)
+        return w_shape / col_sum
+
+    w_ocean_phy = _column_weights(dpt_phys)
+    w_ocean_bio = _column_weights(dpt_bio)
+    w_surface = mask[0]
+
+    channels = []
+    for var in DATASET_VARIABLES:
+        if var in DATASET_VARIABLES_SURFACE:
+            channels.append(w_surface)
+        else:
+            w_ocean = w_ocean_bio if var in DATASET_VARIABLES_OCEAN_BIO else w_ocean_phy
+            channels.extend(w_ocean.unbind(0))
+
+    return _prepare(scaling * torch.stack(channels, dim=0), dim, device)
