@@ -1,7 +1,3 @@
-# ====================================
-#            N E P T U N E
-# ====================================
-
 WandB:
     "entity"  : ["neptuneAI"]
     "project" : ["neptune-ae-training"]
@@ -24,19 +20,19 @@ Autoencoder:
   architecture:
     "checkpointing" : [True]
     "dropout"       : [0.0]
-    "hid_blocks"    : [[3, 3, 3, 3]]
-    "hid_channels"  : [[512, 512, 1024, 1024]]
+    "hid_blocks"    : [[3, 3, 3, 3, 3]]
+    "hid_channels"  : [[512, 512, 768, 1024, 1024]]
     "lat_channels"  : [256]
     "kernel_size"   : [3]
     "stride"        : [2]
     "ffn_factor"    : [1]
 
   training:
-    "steps_update"        : [15000]   # Model updates
+    "steps_update"        : [125000]  # Model updates
     "steps_saving"        : [25]      # Updates between checkpoints
-    "steps_logging"       : [5]       # Updates between logs
-    "batch_size_per_gpu"  : [8]       # Samples per GPU
-    "batch_size_per_step" : [64]      # Samples per update step
+    "steps_logging"       : [10]      # Updates between logs
+    "batch_size_per_gpu"  : [4]       # Samples per GPU
+    "batch_size_per_step" : [128]     # Samples per update step
     "num_workers"         : [4]       # DataLoader workers
     "prefetch_factor"     : [1]       # Prefetched batches
     "learning_rate_start" : [0.00002] # LR | Start

@@ -3,8 +3,8 @@ r"""Spatial masks and loss weights for the Black Sea dataset."""
 __all__ = [
     "get_weights_mask",
     "get_weights_state_mask",
-    "get_weights_loss",
     "get_weights_stats",
+    "get_weights_loss",
 ]
 
 import numpy as np
@@ -15,7 +15,12 @@ from functools import cache
 from torch import Tensor
 
 from neptune.config import PATH_MASK, PATH_STATS
-from neptune.data import DATASET_REGION, DATASET_VARIABLES, DATASET_VARIABLES_SURFACE
+from neptune.data import (
+    DATASET_REGION,
+    DATASET_VARIABLES,
+    DATASET_VARIABLES_OCEAN_BIO,
+    DATASET_VARIABLES_SURFACE,
+)
 
 
 def _prepare(
@@ -128,39 +133,6 @@ def get_weights_state_mask(
     return _prepare(torch.stack(channels, dim=0), dim, device)
 
 
-def get_weights_loss(
-    *,
-    dim: int = 1,
-    scale: float = 1.0,
-    device: torch.device | str | None = None,
-) -> Tensor:
-    r"""Build per-channel loss weights that compensate for depth-varying sea coverage.
-
-    Arguments:
-        dim    : Output rank. 1 → (C, 1, 1), 2 → (1, C, 1, 1).
-        scale  : Optional multiplier for the loss weights.
-        device : Target device ("cpu" or "cuda").
-
-    Returns:
-        weights : Tensor with one weight per channel.
-    """
-    mask = get_weights_mask()
-
-    sum_total = mask.sum()
-    sum_level = mask.sum(dim=(1, 2))
-    weight_z = 1.0 - sum_level / sum_total
-    weight_z = weight_z / weight_z.sum()
-
-    weights = []
-    for var in DATASET_VARIABLES:
-        if var in DATASET_VARIABLES_SURFACE:
-            weights.append(weight_z[0])
-        else:
-            weights.extend(weight_z.unbind(0))
-
-    return _prepare(torch.stack(weights, dim=0)[:, None, None] * scale, dim, device)
-
-
 def get_weights_stats(
     *,
     dim: int = 1,
@@ -181,3 +153,55 @@ def get_weights_stats(
     mean = torch.tensor(means, dtype=torch.float32)[:, None, None]
     std = torch.tensor(stds, dtype=torch.float32)[:, None, None]
     return _prepare(mean, dim, device), _prepare(std, dim, device)
+
+
+def get_weights_loss(
+    *,
+    dim: int = 1,
+    depths: tuple[int, int],
+    w_min: float = 0.1,
+    scaling: float = 100.0,
+    device: torch.device | str | None = None,
+) -> Tensor:
+    r"""Build per-channel, per-location loss weights with equal per-column contribution.
+
+    Arguments:
+        dim     : Output rank. 1 → (C, Y, X), 2 → (1, C, Y, X).
+        depths  : Level indices at which the linear decay begins for ocean variables.
+        w_min   : Minimum (unnormalised) weight at the deepest level of the decay zone.
+        scaling : Global multiplier applied to the final weight tensor.
+        device  : Target device ("cpu" or "cuda").
+
+    Returns:
+        weights : Per-channel, per-location weight tensor. Land pixels are zero.
+    """
+
+    dpt_phys, dpt_bio = depths
+
+    mask = get_weights_mask()
+    z_dim = mask.shape[0]
+    col_depth = mask.sum(dim=0)
+
+    def _column_weights(d_cutoff: int) -> Tensor:
+        r"""Normalised per-column vertical weights (sum_z = 1)."""
+        n_decay = (col_depth - 1 - d_cutoff).clamp(min=0).float()
+        z_idx = torch.arange(z_dim, dtype=torch.float32).view(z_dim, 1, 1)
+        z_above = (z_idx - d_cutoff).clamp(min=0)
+        t = torch.where(n_decay > 0, z_above / n_decay.unsqueeze(0), torch.zeros_like(z_above))
+        w_shape = (1.0 - (1.0 - w_min) * t.clamp(max=1.0)) * mask
+        col_sum = w_shape.sum(dim=0, keepdim=True).clamp(min=1e-8)
+        return w_shape / col_sum
+
+    w_ocean_phy = _column_weights(dpt_phys)
+    w_ocean_bio = _column_weights(dpt_bio)
+    w_surface = mask[0]
+
+    channels = []
+    for var in DATASET_VARIABLES:
+        if var in DATASET_VARIABLES_SURFACE:
+            channels.append(w_surface)
+        else:
+            w_ocean = w_ocean_bio if var in DATASET_VARIABLES_OCEAN_BIO else w_ocean_phy
+            channels.extend(w_ocean.unbind(0))
+
+    return _prepare(scaling * torch.stack(channels, dim=0), dim, device)

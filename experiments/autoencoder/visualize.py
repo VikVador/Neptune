@@ -43,36 +43,36 @@ if __name__ == "__main__":
         cp = checkpoint_name
 
         @dawgz.job(array=1, **config_cluster)
-        def visualize_vertical(i: int, cp: str=cp) -> None:
+        def vis_vertical(i: int, cp: str=cp) -> None:
             visualize_error_vertical(cp)
 
         @dawgz.job(array=1, **config_cluster)
-        def visualize_spectra_job(i: int, cp: str=cp) -> None:
+        def vis_spectra(i: int, cp: str=cp) -> None:
             visualize_spectra(cp)
 
         @dawgz.job(array=1, **config_cluster)
-        def visualize_maps_z(i: int, cp: str=cp) -> None:
-            visualize_error_maps_z(cp)
-
-        @dawgz.job(array=1, **config_cluster)
-        def visualize_maps_x(i: int, cp: str=cp) -> None:
+        def vis_maps_x(i: int, cp: str=cp) -> None:
             visualize_error_maps_x(cp)
 
         @dawgz.job(array=1, **config_cluster)
-        def visualize_maps_y(i: int, cp: str=cp) -> None:
+        def vis_maps_y(i: int, cp: str=cp) -> None:
             visualize_error_maps_y(cp)
 
         @dawgz.job(array=1, **config_cluster)
-        def visualize_recon(i: int, cp: str=cp) -> None:
+        def vis_maps_z(i: int, cp: str=cp) -> None:
+            visualize_error_maps_z(cp)
+
+        @dawgz.job(array=1, **config_cluster)
+        def vis_recon(i: int, cp: str=cp) -> None:
             visualize_reconstructions(cp)
 
         all_jobs.extend([
-            visualize_vertical,
-            visualize_spectra_job,
-            visualize_maps_z,
-            visualize_maps_x,
-            visualize_maps_y,
-            visualize_recon,
+            vis_vertical,
+            vis_spectra,
+            vis_maps_x,
+            vis_maps_y,
+            vis_maps_z,
+            vis_recon,
         ])
 
     dawgz.schedule(

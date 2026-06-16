@@ -14,6 +14,7 @@ __all__ = [
     "PATH_MODELS",
     "PATH_DIAGNOSTICS",
     "PATH_EXP_AE_FIGURES",
+    "PATH_EXP_AE_LATENTS",
     "PATH_PATHS",
     "PATH_GRID_U",
     "PATH_GRID_V",
@@ -49,15 +50,18 @@ PATH_NEP_PROJECT = PATH_MAIN_PROJECT / "neptune"
 PATH_NEP_SCRATCH = PATH_MAIN_SCRATCH / "neptune"
 
 # ----- Subfolders
-PATH_DATASETS    = PATH_NEP_PROJECT / "datasets"
-PATH_MODELS      = PATH_NEP_PROJECT / "models"
-PATH_DIAGNOSTICS = PATH_NEP_PROJECT / "diagnostics"
-PATH_EXPERIMENTS = PATH_NEP_LOCAL   / "experiments"
-PATH_PATHS       = PATH_NEP_PROJECT / "paths"
+PATH_DATASETS            = PATH_NEP_PROJECT / "datasets"
+PATH_MODELS              = PATH_NEP_PROJECT / "models"
+PATH_DIAGNOSTICS         = PATH_NEP_PROJECT / "diagnostics"
+PATH_EXPERIMENTS         = PATH_NEP_LOCAL   / "experiments"
+PATH_EXPERIMENTS_SCRATCH = PATH_NEP_SCRATCH / "experiments"
+PATH_PATHS               = PATH_NEP_PROJECT / "paths"
 
 # ----- Experiments (Autoencoder)
-PATH_EXP_AE         = PATH_EXPERIMENTS / "autoencoder"
-PATH_EXP_AE_FIGURES = PATH_EXP_AE      / "figures"
+PATH_EXP_AE         = PATH_EXPERIMENTS         / "autoencoder"
+PATH_EXP_AE_SCRATCH = PATH_EXPERIMENTS_SCRATCH / "autoencoder"
+PATH_EXP_AE_FIGURES = PATH_EXP_AE              / "figures"
+PATH_EXP_AE_LATENTS = PATH_EXP_AE_SCRATCH      / "latents"
 
 
 # ----- Others

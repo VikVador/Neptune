@@ -1,0 +1,33 @@
+Cluster:
+  "encode":
+    "account"   : ["bsmfc"]
+    "partition" : ["gpu"]
+    "time"      : ["00:10:00"]
+    "cpus"      : [8]
+    "gpus"      : [1]
+    "ram"       : ["60GB"]
+
+  "aggregate":
+    "account"   : ["bsmfc"]
+    "partition" : ["debug-gpu"]
+    "time"      : ["00:30:00"]
+    "cpus"      : [8]
+    "gpus"      : [1]
+    "ram"       : ["60GB"]
+
+Autoencoder:
+  "checkpoint_name" : [null]
+
+Encoding:
+  "timestep" : [32]
+
+  "Splits":
+    "train":
+      "date_start" : "1998-01-01"
+      "date_end"   : "2017-12-31"
+    "validation":
+      "date_start" : "2018-01-01"
+      "date_end"   : "2020-12-31"
+    "test":
+      "date_start" : "2021-01-01"
+      "date_end"   : "2023-12-31"
