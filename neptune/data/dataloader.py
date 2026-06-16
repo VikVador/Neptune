@@ -4,7 +4,7 @@ __all__ = [
     "get_dataloaders",
 ]
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from typing import Any
@@ -44,6 +44,7 @@ def get_dataloaders(
     batch_size: int,
     num_workers: int,
     prefetch_factor: int,
+    get_datasets_fn: Callable = get_datasets,
     shuffle: tuple[bool, bool, bool] = (True, False, False),
     infinite: Sequence[bool] | None = None,
     batches: Sequence[int] | None = None,
@@ -57,14 +58,15 @@ def get_dataloaders(
     Arguments:
         batch_size      : Number of samples per batch (per GPU in distributed mode).
         num_workers     : Number of worker processes for data loading.
-        prefetch_factor : Number of batches prefetched per worker (ignored when num_workers=0).
+        prefetch_factor : Number of batches prefetched per worker.
+        get_datasets_fn : Function returning (train, val, test) datasets.
         shuffle         : Whether to shuffle each split (train, val, test).
         infinite        : Whether to cycle each dataloader indefinitely.
         batches         : Maximum number of batches to yield before stopping.
         rank            : Global rank of the current process (distributed mode).
         world_size      : Total number of processes (distributed mode).
         is_distributed  : Whether to use DistributedSampler for each dataloader.
-        kwargs          : Forwarded to get_datasets().
+        kwargs          : Forwarded to get_datasets_fn().
 
     Returns:
         train_loader : Training dataloader, or an infinite iterator.
@@ -84,7 +86,7 @@ def get_dataloaders(
     for inf, bst in zip(infinite, batches, strict=True):
         assert not (inf and bst is None), "ERROR - batches[i] must be set when infinite[i]=True."
 
-    datasets = get_datasets(**kwargs)
+    datasets = get_datasets_fn(**kwargs)
 
     dataloaders = []
     for i, dataset in enumerate(datasets):
