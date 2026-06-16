@@ -138,8 +138,8 @@ def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
                 params["Hidden Channels"] = v
             elif k == "hid_blocks" and isinstance(v, int):
                 params["Hidden Blocks"] = v
-            elif k == "emb_features":
-                params["Time Embedding Features"] = v
+            elif k == "enc_features":
+                params["Sine Encoding Features"] = v
             elif k == "patch_size":
                 params["Patch Size"] = v
             elif k == "alpha_min":
