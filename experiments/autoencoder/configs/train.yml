@@ -1,7 +1,3 @@
-# ====================================
-#            N E P T U N E
-# ====================================
-
 WandB:
     "entity"  : ["neptuneAI"]
     "project" : ["neptune-ae-training"]

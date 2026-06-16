@@ -2,6 +2,7 @@ r"""A collection of tools designed for data module."""
 
 __all__ = [
     "assert_date_format",
+    "build_windows",
     "generate_paths",
 ]
 
@@ -9,6 +10,7 @@ import ast
 import re
 
 from collections.abc import Sequence
+from datetime import date, timedelta
 
 from neptune.config import (
     PATH_BTRC,
@@ -25,6 +27,32 @@ def assert_date_format(date_string: str) -> None:
     pattern = r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$"
     if not re.match(pattern, date_string):
         raise ValueError("ERROR - The format is incorrect, it should be YYYY-MM-DD.")
+
+
+def build_windows(date_start: str, date_end: str, timestep: int) -> list[tuple[str, str]]:
+    r"""Build consecutive date windows of size timestep days.
+
+    Arguments:
+        date_start : First day of the range, format 'YYYY-MM-DD'.
+        date_end   : Last day of the range, format 'YYYY-MM-DD'.
+        timestep   : Number of days per window.
+
+    Returns:
+        windows : List of (start, end) tuples covering the full range.
+    """
+
+    # Sanity checks of date formats
+    assert_date_format(date_start)
+    assert_date_format(date_end)
+
+    # Building windows
+    start, end, windows = date.fromisoformat(date_start), date.fromisoformat(date_end), []
+    current = start
+    while current <= end:
+        window_end = min(current + timedelta(days=timestep - 1), end)
+        windows.append((current.isoformat(), window_end.isoformat()))
+        current = window_end + timedelta(days=1)
+    return windows
 
 
 def generate_paths() -> dict[str, Sequence[str]]:
