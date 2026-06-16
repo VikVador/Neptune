@@ -3,6 +3,7 @@ r"""A collection of tools for various tasks."""
 __all__ = [
     "load_configuration",
     "generate_run_name_ae",
+    "generate_run_name_diff",
     "get_wandb_hyperparameters",
 ]
 
@@ -80,15 +81,35 @@ def generate_run_name_ae(
     return name
 
 
-def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
-    r"""Flatten a list of config dicts into a WandB-compatible hyperparameter dict for analysis.
+def generate_run_name_diff(
+    hid_channels: int,
+    hid_blocks: int,
+    patch_size: int,
+    previous_run_name: str | None = None,
+) -> str:
+    r"""Generate a descriptive WandB run name encoding the diffusion ViT architecture.
 
     Arguments:
-        configs : List of config dicts (e.g. config_training, config_arch).
+        hid_channels      : ViT hidden channel dimension.
+        hid_blocks        : Number of ViT transformer blocks.
+        patch_size        : Spatial patch size of the ViT tokenizer.
+        previous_run_name : WandB name of the resumed run, if any.
 
     Returns:
-        params : Flat dict mapping human-readable names to scalar values.
+        name : Run name of the form DIFF__hid{}_blk{}_ps{}__XXX[_YYY].
     """
+    xxx = secrets.token_hex(2).upper()
+    name = f"DIFF__hid{hid_channels}_blk{hid_blocks}_ps{patch_size}__{xxx}"
+
+    if previous_run_name is not None:
+        yyy = previous_run_name.split("__")[-1]
+        name = f"{name}_{yyy}"
+
+    return name
+
+
+def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
+    r"""Flatten a configuration into a WandB-compatible hyperparameter dictionnary for analysis."""
     params = {}
     for cfg in configs:
         for k, v in cfg.items():
@@ -96,11 +117,11 @@ def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
                 params["Learning Rate"] = v
             elif k == "batch_size_per_step":
                 params["Batch Size"] = v
-            elif k == "hid_channels":
+            elif k == "hid_channels" and isinstance(v, list):
                 params["Number of Stages"] = len(v)
                 for i, h in enumerate(v):
                     params[f"Hidden Channels (Stage {i})"] = h
-            elif k == "hid_blocks":
+            elif k == "hid_blocks" and isinstance(v, list):
                 for i, b in enumerate(v):
                     params[f"Hidden Blocks (Stage {i})"] = b
             elif k == "lat_channels":
@@ -113,5 +134,17 @@ def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
                 params["FFN Scaling Factor"] = v
             elif k == "dropout":
                 params["Dropout"] = v
+            elif k == "hid_channels" and isinstance(v, int):
+                params["Hidden Channels"] = v
+            elif k == "hid_blocks" and isinstance(v, int):
+                params["Hidden Blocks"] = v
+            elif k == "emb_features":
+                params["Time Embedding Features"] = v
+            elif k == "patch_size":
+                params["Patch Size"] = v
+            elif k == "alpha_min":
+                params["Noise Schedule Alpha Min"] = v
+            elif k == "sigma_min":
+                params["Noise Schedule Sigma Min"] = v
 
     return params
