@@ -1,29 +1,30 @@
-r"""Launch training of autoencoder."""
+r"""Launch training of nowcasting diffusion prior."""
 
 import argparse
-import dask
 import dawgz
 import torch
 import torch.distributed as dist
 
+from azula.denoise import KarrasDenoiser
+from azula.noise import RectifiedSchedule
 from omegaconf import OmegaConf
-from shaggy.loss import AELoss
-from shaggy.models.cae import create_ConvAE
 from shaggy.optimizer import SOAP, safe_gradient_step
-from shaggy.tools import load as s_load
-from shaggy.tools import save as s_save
 from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 import wandb
 
 from neptune.config import PATH_MODELS
-from neptune.data import C_IN, C_OUT, C
 from neptune.data.dataloader import get_dataloaders
-from neptune.data.weights import get_weights_loss, get_weights_mask
+from neptune.data.dataset import get_blanket_latent_datasets
+from neptune.diffusion import LatentViT, load, save
 from neptune.distributed import reduce_mean, setup_distributed
 from neptune.schedulers import warmup_cosine_decay
-from neptune.tools import generate_run_name_ae, get_wandb_hyperparameters, load_configuration
+from neptune.tools import (
+    generate_run_name_diff_nowcast,
+    get_wandb_hyperparameters,
+    load_configuration,
+)
 
 
 # fmt: off
@@ -32,44 +33,21 @@ def training(
     config_state: dict,
     config_training: dict,
     config_arch: dict,
+    config_schedule: dict,
     config_wandb: dict,
     config_cluster: dict,
 ) -> None:
-    r"""Launch the training of an autoencoder."""
+    r"""Launch the training of a nowcasting diffusion prior."""
 
     # Initialize distributed setup
     rank, local_rank, world_size, device, is_distributed = setup_distributed()
 
-    # Prevent xarray/dask deadlocks inside DataLoader workers
-    dask.config.set(scheduler="synchronous")
-
-    # Weights & Biases
-    run_name = generate_run_name_ae(
-        in_channels       = C,
-        lat_channels      = config_arch["lat_channels"],
-        hid_channels      = config_arch["hid_channels"],
-        hid_blocks        = config_arch["hid_blocks"],
-        stride            = config_arch["stride"],
-        previous_run_name = config_state["checkpoint_name"],
-    )
-
-    if rank == 0:
-        wandb.init(
-            **config_wandb,
-            name=run_name,
-            config={
-                "State"           : config_state,
-                "Training"        : config_training,
-                "Architecture"    : config_arch,
-                "Cluster"         : config_cluster,
-                "Hyperparameters" : get_wandb_hyperparameters([config_training, config_arch]),
-            },
-        )
-    else:
-        wandb.init(mode="disabled")
-
     (
         saving,
+        ae_checkpoint_name,
+        diff_checkpoint_name,
+        alpha_min,
+        sigma_min,
         steps_update,
         steps_logging,
         steps_saving,
@@ -83,6 +61,10 @@ def training(
         warmup_steps,
     ) = (
         config_state["saving"],
+        config_state["checkpoint_name_ae"],
+        config_state["checkpoint_name_diff_nc"],
+        config_schedule["alpha_min"],
+        config_schedule["sigma_min"],
         config_training["steps_update"],
         config_training["steps_logging"],
         config_training["steps_saving"],
@@ -96,7 +78,32 @@ def training(
         config_training["warmup_steps"],
     )
 
-    # Number of steps to accumulate gradients before updating model parameters
+    # Weights & Biases
+    run_name = generate_run_name_diff_nowcast(
+        ae_checkpoint_name = ae_checkpoint_name,
+        hid_channels       = config_arch["hid_channels"],
+        hid_blocks         = config_arch["hid_blocks"],
+        patch_size         = config_arch["patch_size"],
+        previous_run_name  = diff_checkpoint_name,
+    )
+
+    if rank == 0:
+        wandb.init(
+            **config_wandb,
+            name=run_name,
+            config={
+                "State"           : config_state,
+                "Training"        : config_training,
+                "Architecture"    : config_arch,
+                "Schedule"        : config_schedule,
+                "Cluster"         : config_cluster,
+                "Hyperparameters" : get_wandb_hyperparameters([config_training, config_arch, config_schedule]),
+            },
+        )
+    else:
+        wandb.init(mode="disabled")
+
+    # Gradient accumulation
     batch_size_per_process      = batch_size_per_gpu * world_size
     steps_gradient_accumulation = max(1, (batch_size_per_step + batch_size_per_process - 1) // batch_size_per_process)
     batches                     = [steps_update * steps_gradient_accumulation, None, None]
@@ -105,40 +112,47 @@ def training(
         batch_size      = batch_size_per_gpu,
         num_workers     = num_workers,
         prefetch_factor = prefetch_factor,
+        get_datasets_fn = get_blanket_latent_datasets,
+        blanket_size    = 1,
         batches         = batches,
         shuffle         = [True, False, False],
         infinite        = [True, False, False],
         rank            = rank,
         world_size      = world_size,
         is_distributed  = is_distributed,
+        checkpoint_name = ae_checkpoint_name,
     )
 
-    # Initializing weighting tensors
-    w_mask, w_loss = (
-        get_weights_mask(dim=2,                  device=device),
-        get_weights_loss(dim=2, depths=(47, 37), device=device),
-    )
+    # Infering latent shape from a sample
+    _ds_tmp             = get_blanket_latent_datasets(ae_checkpoint_name, blanket_size=1)[0]
+    C_LAT, X_LAT, Y_LAT = _ds_tmp[0][0].shape[1:]
+    del _ds_tmp
 
     # Model | Loading checkpoint or new
-    if config_state["checkpoint_name"] is not None:
-        ckpt_path = PATH_MODELS / config_state["checkpoint_name"]
-        model     = s_load(ckpt_path, device=str(device)).train()
+    if diff_checkpoint_name is not None:
+        ckpt_path = PATH_MODELS / diff_checkpoint_name
+        backbone  = load(ckpt_path, device=str(device)).train()
     else:
-        model = create_ConvAE(in_channels  = C_IN, out_channels = C_OUT, **config_arch).to(device)
+        backbone = LatentViT(lat_channels = C_LAT, cond_channels = 1, **config_arch)
+
+    # Preparing diffusion setup
+    backbone = backbone.to(device)
+    schedule = RectifiedSchedule(alpha_min=alpha_min, sigma_min=sigma_min)
+    denoiser = KarrasDenoiser(backbone, schedule).to(device)
 
     # Model | Defining if DDP or DataParallel
     if is_distributed:
         ddp_kwargs = {"device_ids": [local_rank], "output_device": local_rank} if device.type == "cuda" else {}
-        model      = DDP(model, **ddp_kwargs)
+        backbone   = DDP(backbone, **ddp_kwargs)
     elif torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model, device_ids=list(range(torch.cuda.device_count()))).to(device)
+        backbone = torch.nn.DataParallel(backbone, device_ids=list(range(torch.cuda.device_count()))).to(device)
 
-    # Logging number of trainable parameters
+    # Log trainable parameters
     if rank == 0:
-        wandb.log({"Informations/Trainable Parameters [M]": sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6,})
+        wandb.log({"Informations/Trainable Parameters [M]": sum(p.numel() for p in backbone.parameters() if p.requires_grad) / 1e6})
 
-    # Setting up training tools
-    optimizer = SOAP(model.parameters(), lr=lr_peak, max_precond_size=128)
+    # SOAP optimizer and warmup-cosine scheduler
+    optimizer = SOAP(backbone.parameters(), lr=lr_peak, max_precond_size=128)
     scheduler = warmup_cosine_decay(
         optimizer    = optimizer,
         lr_start     = lr_start,
@@ -149,7 +163,6 @@ def training(
     )
 
     scaler                   = GradScaler(enabled=False)
-    loss_function            = AELoss(weights=w_loss)
     loss_accumulator         = 0.0
     loss_logging_accumulator = 0.0
     loss_mean                = float("inf")
@@ -157,29 +170,31 @@ def training(
     gradient_norm            = float("inf")
     optimizer_step           = 0
 
-    # Waiting for processes to be ready
+    # Wait for all processes to be ready
     if is_distributed:
         dist.barrier(device_ids=[local_rank] if device.type == "cuda" else None)
 
-    for step, (x, _) in enumerate(dataloader_training):
+    for step, (z, dates) in enumerate(dataloader_training):
 
-        # Pushing to device and concatenating mask
-        x = x.to(device)
-        x = torch.cat([x, w_mask.expand(x.shape[0], -1, -1, -1)], dim=1) # (B, C_IN, Y, X)
+        # Pushing to device
+        z = z.squeeze(1).to(device)
+
+        # Computing conditioning (year progress)
+        cond = LatentViT.day_of_year_to_conditioning(list(dates[0]), X_LAT, Y_LAT, device)
+
+        # Sampling noise levels
+        t = torch.rand(z.shape[0], device=device)
 
         with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
 
-            # Forward pass
-            _, x_hat = model(x)
-
-            # Computing loss
-            loss = loss_function(x_hat, x[:, :C_OUT])
+            # Forward pass and loss computation
+            loss = denoiser.loss(z, t, cond=cond).mean()
 
         # Gradient accumulation
         loss              = loss / steps_gradient_accumulation
         loss_accumulator += loss.item()
 
-        # Logging to console if not using WandB
+        # Console logging when WandB is disabled
         if config_wandb["mode"] == "disabled":
             print(f"Step {optimizer_step:6d} | Loss: {loss_accumulator:.4f} | γ: {scheduler.get_last_lr()[0]:.6f} | ∇: {gradient_norm:.4f}")
 
@@ -187,19 +202,18 @@ def training(
         is_last_accumulation_step = ((step + 1) % steps_gradient_accumulation == 0)
 
         if is_distributed and not is_last_accumulation_step:
-            with model.no_sync():
+            with backbone.no_sync():
                 scaler.scale(loss).backward()
         else:
             scaler.scale(loss).backward()
 
         # Cleaning up memory
-        del x, x_hat
+        del z
 
         # Optimization step
         if is_last_accumulation_step:
             gradient_norm             = safe_gradient_step(optimizer=optimizer, scaler=scaler, grad_clip=1.0)
-            loss_to_log               = loss_accumulator
-            loss_logging_accumulator += loss_to_log
+            loss_logging_accumulator += loss_accumulator
             loss_accumulator          = 0.0
             optimizer_step           += 1
             scheduler.step()
@@ -230,12 +244,20 @@ def training(
         if saving and optimizer_step % steps_saving == 0 and is_last_accumulation_step and optimizer_step > 0 and rank == 0:
             if loss_mean < loss_best:
 
-                # Extracting raw model and creating checkpoint configuration
-                raw_model   = model.module if hasattr(model, "module") else model
-                ckpt_config = OmegaConf.create({"in_channels": C_IN, "out_channels": C_OUT, **config_arch})
+                # Creating checkpoint
+                save_dir     = PATH_MODELS / wandb.run.name
+                raw_backbone = backbone.module if hasattr(backbone, "module") else backbone
+                config_save  = OmegaConf.create({
+                    "lat_channels"  : C_LAT,
+                    "cond_channels" : 1,
+                    "X_LAT"         : X_LAT,
+                    "Y_LAT"         : Y_LAT,
+                    **config_arch,
+                    **config_schedule,
+                })
 
-                # Saving model (overwrites previous checkpoint for this run)
-                s_save(raw_model, ckpt_config, PATH_MODELS / wandb.run.name)
+                # Saving checkpoint
+                save(raw_backbone, config_save, save_dir)
 
                 # Updating best loss
                 loss_best = loss_mean
@@ -248,7 +270,7 @@ def training(
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Launch an autoencoder training pipeline.")
+    parser = argparse.ArgumentParser(description="Launch a nowcasting diffusion prior training.")
     parser.add_argument(
         "--config",
         "-c",
@@ -256,7 +278,6 @@ if __name__ == "__main__":
         required=True,
         help="Path to the training .yml configuration file.",
     )
-
     parser.add_argument(
         "--backend",
         "-b",
@@ -278,13 +299,14 @@ if __name__ == "__main__":
 
     # Local
     if args.backend == "async":
-        ae = configs[0]["Autoencoder"]
+        diff = configs[0]["Diffusion"]
         training(
-            config_state=ae["state"],
-            config_training=ae["training"],
-            config_arch=ae["architecture"],
-            config_wandb=config_wandb,
-            config_cluster=config_cluster,
+            config_state    = diff["state"],
+            config_training = diff["training"],
+            config_arch     = diff["architecture"],
+            config_schedule = diff["schedule"],
+            config_wandb    = config_wandb,
+            config_cluster  = config_cluster,
         )
 
     # Cluster
@@ -309,19 +331,20 @@ if __name__ == "__main__":
             partition=config_cluster["partition"],
         )
         def train(i: int) -> None:
-            ae = configs[i]["Autoencoder"]
+            diff = configs[i]["Diffusion"]
             training(
-                config_state=ae["state"],
-                config_training=ae["training"],
-                config_arch=ae["architecture"],
-                config_wandb=config_wandb,
-                config_cluster=config_cluster,
+                config_state    = diff["state"],
+                config_training = diff["training"],
+                config_arch     = diff["architecture"],
+                config_schedule = diff["schedule"],
+                config_wandb    = config_wandb,
+                config_cluster  = config_cluster,
             )
 
         dawgz.schedule(
             train,
-            name="AE-TRAIN",
+            name="DIFF-TRAIN-NOWCASTING",
             backend="slurm",
             interpreter=interpreter,
-            export="ALL"
+            export="ALL",
         )

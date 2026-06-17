@@ -1,6 +1,6 @@
 WandB:
     "entity"  : ["neptuneAI"]
-    "project" : ["neptune-ae-debug"]
+    "project" : ["neptune-diff-nc-debug"]
     "mode"    : ["disabled"]
 
 Cluster:
@@ -12,20 +12,25 @@ Cluster:
   "gpus-per-node" : [1]
   "ram-per-node"  : ["60GB"]
 
-Autoencoder:
+Diffusion:
   state:
-    "checkpoint_name" : [null]
-    "saving"          : [false]
+    "checkpoint_name_ae"      : [null]
+    "checkpoint_name_diff_nc" : [null]
+    "saving"                  : [false]
 
   architecture:
-    "checkpointing" : [false]
-    "dropout"       : [0.02]
-    "hid_blocks"    : [[1, 1, 1]]
-    "hid_channels"  : [[32, 64, 128]]
-    "lat_channels"  : [32]
-    "kernel_size"   : [3]
-    "stride"        : [2]
-    "ffn_factor"    : [1]
+    "checkpointing"   : [false]
+    "dropout"         : [0.02]
+    "enc_features"    : [32]
+    "hid_blocks"      : [8]
+    "hid_channels"    : [256]
+    "patch_size"      : [1]
+    "attention_heads" : [2]
+    "ffn_factor"      : [4]
+
+  schedule:
+    "alpha_min" : [0.001]
+    "sigma_min" : [0.001]
 
   training:
     "steps_update"        : [128]
