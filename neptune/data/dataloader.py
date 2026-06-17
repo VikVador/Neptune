@@ -44,7 +44,7 @@ def get_dataloaders(
     batch_size: int,
     num_workers: int,
     prefetch_factor: int,
-    get_datasets_fn: Callable = get_datasets,
+    get_datasets_fn: Callable | None = None,
     shuffle: tuple[bool, bool, bool] = (True, False, False),
     infinite: Sequence[bool] | None = None,
     batches: Sequence[int] | None = None,
@@ -73,6 +73,8 @@ def get_dataloaders(
         val_loader   : Validation dataloader, or an infinite iterator.
         test_loader  : Test dataloader, or an infinite iterator.
     """
+    if get_datasets_fn is None:
+        get_datasets_fn = get_datasets
     if infinite is None:
         infinite = [False, False, False]
     if batches is None:
