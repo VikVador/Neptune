@@ -4,6 +4,7 @@ import argparse
 import dawgz
 import torch
 import torch.distributed as dist
+import wandb
 
 from azula.denoise import KarrasDenoiser
 from azula.noise import RectifiedSchedule
@@ -11,8 +12,6 @@ from omegaconf import OmegaConf
 from shaggy.optimizer import SOAP, safe_gradient_step
 from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
-
-import wandb
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders

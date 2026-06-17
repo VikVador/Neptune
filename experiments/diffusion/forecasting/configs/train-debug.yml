@@ -1,0 +1,48 @@
+WandB:
+    "entity"  : ["neptuneAI"]
+    "project" : ["neptune-diff-fc-debug"]
+    "mode"    : ["disabled"]
+
+Cluster:
+  "account"       : ["bsmfc"]
+  "partition"     : ["debug-gpu"]
+  "time"          : ["00:10:00"]
+  "nodes"         : [1]
+  "cpus-per-node" : [8]
+  "gpus-per-node" : [1]
+  "ram-per-node"  : ["60GB"]
+
+Diffusion:
+  state:
+    "saving"                  : [false]
+    "checkpoint_name_ae"      : [null]
+    "checkpoint_name_diff_fc" : [null]
+
+  architecture:
+    "checkpointing"   : [false]
+    "dropout"         : [0.02]
+    "input_states"    : [1]
+    "output_states"   : [1]
+    "enc_features"    : [32]
+    "hid_blocks"      : [8]
+    "hid_channels"    : [256]
+    "patch_size"      : [1]
+    "attention_heads" : [2]
+    "ffn_factor"      : [4]
+
+  schedule:
+    "alpha_min" : [0.001]
+    "sigma_min" : [0.001]
+
+  training:
+    "steps_update"        : [128]
+    "steps_saving"        : [32]
+    "steps_logging"       : [4]
+    "batch_size_per_gpu"  : [1]
+    "batch_size_per_step" : [2]
+    "num_workers"         : [1]
+    "prefetch_factor"     : [1]
+    "learning_rate_start" : [0.0001]
+    "learning_rate_peak"  : [0.0005]
+    "learning_rate_end"   : [0.0001]
+    "warmup_steps"        : [16]

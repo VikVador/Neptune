@@ -184,5 +184,9 @@ def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
                 params["Noise Schedule Alpha Min"] = v
             elif k == "sigma_min":
                 params["Noise Schedule Sigma Min"] = v
+            elif k == "input_states":
+                params["Input States"] = v
+            elif k == "output_states":
+                params["Output States"] = v
 
     return params
