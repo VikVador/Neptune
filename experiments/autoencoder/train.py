@@ -5,7 +5,6 @@ import dask
 import dawgz
 import torch
 import torch.distributed as dist
-import wandb
 
 from omegaconf import OmegaConf
 from shaggy.loss import AELoss
@@ -15,6 +14,8 @@ from shaggy.tools import load as s_load
 from shaggy.tools import save as s_save
 from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+import wandb
 
 from neptune.config import PATH_MODELS
 from neptune.data import C_IN, C_OUT, C
@@ -68,6 +69,7 @@ def training(
         wandb.init(mode="disabled")
 
     (
+        saving,
         steps_update,
         steps_logging,
         steps_saving,
@@ -80,6 +82,7 @@ def training(
         lr_end,
         warmup_steps,
     ) = (
+        config_state["saving"],
         config_training["steps_update"],
         config_training["steps_logging"],
         config_training["steps_saving"],
@@ -224,7 +227,7 @@ def training(
                 })
 
         # Saving checkpoint
-        if optimizer_step % steps_saving == 0 and is_last_accumulation_step and optimizer_step > 0 and rank == 0:
+        if saving and optimizer_step % steps_saving == 0 and is_last_accumulation_step and optimizer_step > 0 and rank == 0:
             if loss_mean < loss_best:
 
                 # Extracting raw model and creating checkpoint configuration

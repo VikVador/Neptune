@@ -4,7 +4,6 @@ import argparse
 import dawgz
 import torch
 import torch.distributed as dist
-import wandb
 
 from azula.denoise import KarrasDenoiser
 from azula.noise import RectifiedSchedule
@@ -12,6 +11,8 @@ from omegaconf import OmegaConf
 from shaggy.optimizer import SOAP, safe_gradient_step
 from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+import wandb
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
@@ -42,6 +43,7 @@ def training(
     rank, local_rank, world_size, device, is_distributed = setup_distributed()
 
     (
+        saving,
         ae_checkpoint_name,
         diff_checkpoint_name,
         alpha_min,
@@ -58,8 +60,9 @@ def training(
         lr_end,
         warmup_steps,
     ) = (
-        config_state["ae_checkpoint_name"],
-        config_state["diff_checkpoint_name"],
+        config_state["saving"],
+        config_state["checkpoint_name_ae"],
+        config_state["checkpoint_name_diff_nc"],
         config_schedule["alpha_min"],
         config_schedule["sigma_min"],
         config_training["steps_update"],
@@ -238,7 +241,7 @@ def training(
                 })
 
         # Saving checkpoint
-        if optimizer_step % steps_saving == 0 and is_last_accumulation_step and optimizer_step > 0 and rank == 0:
+        if saving and optimizer_step % steps_saving == 0 and is_last_accumulation_step and optimizer_step > 0 and rank == 0:
             if loss_mean < loss_best:
 
                 # Creating checkpoint
