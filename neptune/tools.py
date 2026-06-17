@@ -3,7 +3,8 @@ r"""A collection of tools for various tasks."""
 __all__ = [
     "load_configuration",
     "generate_run_name_ae",
-    "generate_run_name_diff",
+    "generate_run_name_diff_nowcast",
+    "generate_run_name_diff_forecast",
     "get_wandb_hyperparameters",
 ]
 
@@ -81,28 +82,65 @@ def generate_run_name_ae(
     return name
 
 
-def generate_run_name_diff(
+def generate_run_name_diff_nowcast(
+    ae_checkpoint_name: str,
     hid_channels: int,
     hid_blocks: int,
     patch_size: int,
     previous_run_name: str | None = None,
 ) -> str:
-    r"""Generate a descriptive WandB run name encoding the diffusion ViT architecture.
+    r"""Generate a descriptive WandB run name encoding the nowcasting diffusion ViT architecture.
 
     Arguments:
-        hid_channels      : ViT hidden channel dimension.
-        hid_blocks        : Number of ViT transformer blocks.
-        patch_size        : Spatial patch size of the ViT tokenizer.
-        previous_run_name : WandB name of the resumed run, if any.
+        ae_checkpoint_name : WandB name of the autoencoder checkpoint used to generate the latents.
+        hid_channels       : ViT hidden channel dimension.
+        hid_blocks         : Number of ViT transformer blocks.
+        patch_size         : Spatial patch size of the ViT tokenizer.
+        previous_run_name  : WandB name of the resumed run, if any.
 
     Returns:
-        name : Run name of the form DIFF__hid{}_blk{}_ps{}__XXX[_YYY].
+        name : Run name of the form VIT_NC_{AE}__hc{}_bl{}_ps{}__XXX[_YYY].
     """
+    ae_code = ae_checkpoint_name.split("__")[-1].split("_")[0]
     xxx = secrets.token_hex(2).upper()
-    name = f"DIFF__hid{hid_channels}_blk{hid_blocks}_ps{patch_size}__{xxx}"
+    name = f"VIT_NC_{ae_code}__hc{hid_channels}_bl{hid_blocks}_ps{patch_size}__{xxx}"
 
     if previous_run_name is not None:
-        yyy = previous_run_name.split("__")[-1]
+        yyy = previous_run_name.split("__")[-1].split("_")[0]
+        name = f"{name}_{yyy}"
+
+    return name
+
+
+def generate_run_name_diff_forecast(
+    ae_checkpoint_name: str,
+    hid_channels: int,
+    hid_blocks: int,
+    patch_size: int,
+    input_states: int,
+    output_states: int,
+    previous_run_name: str | None = None,
+) -> str:
+    r"""Generate a descriptive WandB run name encoding the forecasting diffusion ViT architecture.
+
+    Arguments:
+        ae_checkpoint_name : WandB name of the autoencoder checkpoint used to generate the latents.
+        hid_channels       : ViT hidden channel dimension.
+        hid_blocks         : Number of ViT transformer blocks.
+        patch_size         : Spatial patch size of the ViT tokenizer.
+        input_states       : Number of past states given as conditioning.
+        output_states      : Number of future states to forecast.
+        previous_run_name  : WandB name of the resumed run, if any.
+
+    Returns:
+        name : Run name of the form VIT_FC_{AE}__hc{}_bl{}_ps{}_is{}_os{}__XXX[_YYY].
+    """
+    ae_code = ae_checkpoint_name.split("__")[-1].split("_")[0]
+    xxx = secrets.token_hex(2).upper()
+    name = f"VIT_FC_{ae_code}__hc{hid_channels}_bl{hid_blocks}_ps{patch_size}_is{input_states}_os{output_states}__{xxx}"
+
+    if previous_run_name is not None:
+        yyy = previous_run_name.split("__")[-1].split("_")[0]
         name = f"{name}_{yyy}"
 
     return name
