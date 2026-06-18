@@ -24,6 +24,7 @@ from neptune.data import (
     DATASET_DATES_VALIDATION,
     DATASET_REGION,
     DATASET_VARIABLES,
+    DATASET_VARIABLES_OCEAN,
     VARIABLES_CLIPPING,
 )
 from neptune.data.tools import assert_date_format, generate_paths
@@ -146,44 +147,37 @@ class NeptuneDataset(Dataset):
             missing = [v for v in DATASET_VARIABLES if v not in ds]
             if missing:
                 raise KeyError(f"ERROR - Missing required variables: {missing}")
-            ds = ds[DATASET_VARIABLES]
-            ds = ds.isel(**DATASET_REGION)
-            ds = ds.isel(time_counter=0)
-            ds.load()
 
-        # Unify depth dimension (depthu, depthv → deptht)
-        for var, old_dim in [("uo", "depthu"), ("vo", "depthv")]:
-            if var in ds and old_dim in ds[var].dims:
-                ds[var] = xr.DataArray(
-                    ds[var].values, dims=["deptht", "y", "x"], attrs=ds[var].attrs
-                )
-        ds = ds.drop_vars(["depthu", "depthv"], errors="ignore")
+            # Extracting partial domain
+            ds = (
+                ds[DATASET_VARIABLES]
+                .isel(x=DATASET_REGION["x"], y=DATASET_REGION["y"], time_counter=0)
+                .load()
+            )
 
-        # Clip physical bounds (values outside bounds are clipped to the bound)
-        for var, (lo, hi) in VARIABLES_CLIPPING.items():
-            if var in ds:
-                ds[var] = ds[var].clip(min=lo, max=hi)
-
-        # Stack all variables into channels → (C, Y, X)
+        # Extracting levels
+        z_slice = DATASET_REGION["z"]
         channels = []
         for var in DATASET_VARIABLES:
-            if var not in ds:
-                raise KeyError(f"ERROR - Missing required variable: {var}")
-            data = torch.as_tensor(ds[var].values.copy(), dtype=torch.float32)
+            da = ds[var]
+            if var in VARIABLES_CLIPPING:
+                lo, hi = VARIABLES_CLIPPING[var]
+                da = da.clip(min=lo, max=hi)
+            if var in DATASET_VARIABLES_OCEAN:
+                depth_dim = next((d for d in da.dims if d.startswith("depth")), None)
+                if depth_dim:
+                    da = da.isel({depth_dim: z_slice})
+            data = torch.as_tensor(da.values.copy(), dtype=torch.float32)
             if data.ndim == 3:
                 channels.extend(data.unbind(0))
             else:
                 channels.append(data)
+
+        # Preprocessing
         sample = torch.stack(channels, dim=0)
-
-        # Replace statistical outliers channel-wise with the channel mean
         sample = self.replace_outliers(sample)
-
-        # Standardize channel-wise
         if self.standardized:
             sample = self.standardize(sample)
-
-        # Mask land
         if self.fill_with_nans:
             return sample.masked_fill(self.mask_tensor == 0, float("nan"))
         return sample.nan_to_num(0.0) * self.mask_tensor

@@ -9,8 +9,6 @@ import numpy as np
 
 from neptune.data import VARIABLES_CLIPPING
 
-_EPS = 1e-8
-
 
 class OnlineStats:
     r"""Incremental mean and variance using weighted batch averaging."""
@@ -53,7 +51,7 @@ class OnlineStats:
     def std(self) -> float:
         if self.mu is None:
             return 1.0
-        return max(float(np.sqrt(max(self.mu_sq - self.mu**2, 0.0))), _EPS)
+        return max(float(np.sqrt(max(self.mu_sq - self.mu**2, 0.0))), 1e-8)
 
 
 def clean(

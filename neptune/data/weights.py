@@ -11,10 +11,12 @@ import numpy as np
 import torch
 import xarray as xr
 
-from functools import cache
 from torch import Tensor
 
-from neptune.config import PATH_MASK, PATH_STATS
+from neptune.config import (
+    PATH_MASK,
+    PATH_STATS,
+)
 from neptune.data import (
     DATASET_REGION,
     DATASET_VARIABLES,
@@ -38,44 +40,52 @@ def _prepare(
     return t
 
 
-def _depth_dim(var: str) -> str:
-    r"""Return the depth dimension name corresponding to a given variable."""
-    if var == "uo":
-        return "depthu"
-    if var == "vo":
-        return "depthv"
-    return "deptht"
-
-
-@cache
 def _mask_array() -> np.ndarray:
-    r"""Load and cache the ocean mask array from the zarr store."""
+    r"""Load the ocean mask array from the zarr store.
+
+    Returns:
+        mask : Binary numpy array of shape (Z, Y, X).
+    """
     ds = xr.open_zarr(PATH_MASK)
     try:
         return ds.mask.isel(
             longitude=DATASET_REGION["x"],
             latitude=DATASET_REGION["y"],
-            level=DATASET_REGION["depthu"],
+            level=DATASET_REGION["z"],
         ).values
     finally:
         ds.close()
 
 
-@cache
 def _stats_arrays() -> tuple[list[float], list[float]]:
-    r"""Load and cache per-channel mean and std from the statistics zarr store."""
+    r"""Load per-channel mean and std from the statistics zarr store.
+
+    Returns:
+        means : Per-channel mean values.
+        stds  : Per-channel standard deviation values.
+    """
+
+    z_slice = DATASET_REGION["z"]
     ds = xr.open_zarr(PATH_STATS)
     try:
         means: list[float] = []
         stds: list[float] = []
+        z_len = z_slice.stop - z_slice.start
         for var in DATASET_VARIABLES:
             if var in DATASET_VARIABLES_SURFACE:
                 means.append(float(ds[var].sel(statistic="mean")))
                 stds.append(float(ds[var].sel(statistic="std")))
             else:
-                depth = _depth_dim(var)
-                m = ds[var].sel(statistic="mean").isel({depth: DATASET_REGION[depth]}).values
-                s = ds[var].sel(statistic="std").isel({depth: DATASET_REGION[depth]}).values
+                da_mean = ds[var].sel(statistic="mean")
+                da_std = ds[var].sel(statistic="std")
+                depth = next((d for d in da_mean.dims if d.startswith("depth")), None)
+                if depth:
+                    m = da_mean.isel({depth: z_slice}).values
+                    s = da_std.isel({depth: z_slice}).values
+                else:
+                    # stats zarr has no depth dim for this var: replicate to match preprocess
+                    m = np.full(z_len, float(da_mean))
+                    s = np.full(z_len, float(da_std))
                 means.extend(m.tolist())
                 stds.extend(s.tolist())
         return means, stds
@@ -97,12 +107,6 @@ def get_weights_mask(
     Returns:
         mask : Binary tensor with 1 on sea and 0 on land.
     """
-    z_u = DATASET_REGION["depthu"].stop
-    z_v = DATASET_REGION["depthv"].stop
-    z_t = DATASET_REGION["deptht"].stop
-    if not (z_u == z_v == z_t):
-        raise ValueError(f"Depth slices must match: got depthu={z_u}, depthv={z_v}, deptht={z_t}")
-
     mask = _mask_array()
     return _prepare(torch.as_tensor(mask, dtype=torch.float32), dim, device)
 
