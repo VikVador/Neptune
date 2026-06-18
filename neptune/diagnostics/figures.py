@@ -78,7 +78,7 @@ _GT_COLOR              = "#808080"
 _DX_KM                 = 2.8
 _YLIM_SURFACE          = (1e-4, 5e4)
 _YLIM_OCEAN            = (1e-4, 1e4)
-_SPECTRA_DEPTHS        = [0, 25, 41]
+_SPECTRA_DEPTHS        = [0, 25, Z - 1]
 _SPECTRA_WAVELENGTHS   = [300, 80, 20]
 _LINESTYLES            = ["dashed", "dotted", "dashdot"]
 
