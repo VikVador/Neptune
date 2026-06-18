@@ -40,11 +40,9 @@ DATASET_DATES_VALIDATION = ("2018-01-01", "2020-12-31")
 DATASET_DATES_TEST       = ("2021-01-01", "2023-12-31")
 
 DATASET_REGION = {
-    "x":      slice(2, 578),
-    "y":      slice(2, 258),
-    "depthu": slice(0, 48),
-    "depthv": slice(0, 48),
-    "deptht": slice(0, 48),
+    "x": slice(2, 578),
+    "y": slice(2, 258),
+    "z": slice(0, 48),
 }
 
 DATASET_VARIABLES_SURFACE = [
@@ -73,9 +71,10 @@ DATASET_VARIABLES           = DATASET_VARIABLES_SURFACE + DATASET_VARIABLES_OCEA
 
 # ----- Dimensions
 #
-Z     = DATASET_REGION["deptht"].stop - DATASET_REGION["deptht"].start     # Depth levels
-C     = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z  # Aggregated levels
 X     = DATASET_REGION["x"].stop - DATASET_REGION["x"].start               # Longitudes
 Y     = DATASET_REGION["y"].stop - DATASET_REGION["y"].start               # Latitudes
+Z     = DATASET_REGION["z"].stop - DATASET_REGION["z"].start               # Depth levels
+
+C     = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z  # Aggregated levels
 C_IN  = C + Z                                                              # State variables + Mask
 C_OUT = C                                                                  # State variables
