@@ -1,6 +1,7 @@
 r"""Launch training of autoencoder."""
 
 import argparse
+import cloudpickle
 import dask
 import dawgz
 import torch
@@ -288,6 +289,15 @@ if __name__ == "__main__":
 
     # Cluster
     else:
+
+        # Freeze modules to avoid pickling issues
+        import neptune.data
+        import neptune.data.dataloader
+        import neptune.data.dataset
+        import neptune.data.weights
+        for _mod in [neptune.data, neptune.data.dataset, neptune.data.weights, neptune.data.dataloader]:
+            cloudpickle.register_pickle_by_value(_mod)
+
         if nodes > 1:
             interpreter = (
                 f"torchrun --nnodes {nodes} --nproc-per-node {gpus_per_node} "
