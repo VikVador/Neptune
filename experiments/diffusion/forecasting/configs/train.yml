@@ -14,9 +14,9 @@ Cluster:
 
 Diffusion:
   state:
-    "saving"                  : [true]
     "checkpoint_name_ae"      : [null]
     "checkpoint_name_diff_fc" : [null]
+    "saving"                  : [true]
 
   architecture:
     "checkpointing"   : [false]
