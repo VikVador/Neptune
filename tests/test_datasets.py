@@ -5,19 +5,16 @@ import torch
 
 from neptune.data import (
     DATASET_DATES_TRAINING,
-    DATASET_REGION,
     DATASET_VARIABLES,
-    DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     VARIABLES_CLIPPING,
+    C,
+    X,
+    Y,
+    Z,
 )
 from neptune.data.dataset import NeptuneDataset, get_datasets
 from neptune.data.weights import get_weights_state_mask
-
-X = DATASET_REGION["x"].stop - DATASET_REGION["x"].start
-Y = DATASET_REGION["y"].stop - DATASET_REGION["y"].start
-Z = DATASET_REGION["depthu"].stop - DATASET_REGION["depthu"].start
-C = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z
 
 
 @pytest.fixture()
