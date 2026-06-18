@@ -17,7 +17,7 @@ from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from neptune.config import PATH_MODELS
-from neptune.data import C_IN, C_OUT, C
+from neptune.data import C_IN, C_OUT, C, Z
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_loss, get_weights_mask
 from neptune.distributed import reduce_mean, setup_distributed
@@ -114,8 +114,8 @@ def training(
 
     # Initializing weighting tensors
     w_mask, w_loss = (
-        get_weights_mask(dim=2,                  device=device),
-        get_weights_loss(dim=2, depths=(47, 37), device=device),
+        get_weights_mask(dim=2,                                          device=device),
+        get_weights_loss(dim=2, depths=(min(47, Z - 1), min(37, Z - 1)), device=device),
     )
 
     # Model | Loading checkpoint or new
@@ -164,7 +164,7 @@ def training(
 
         # Pushing to device and concatenating mask
         x = x.to(device)
-        x = torch.cat([x, w_mask.expand(x.shape[0], -1, -1, -1)], dim=1) # (B, C_IN, Y, X)
+        x = torch.cat([x, w_mask.expand(x.shape[0], -1, -1, -1)], dim=1)
 
         with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
 
