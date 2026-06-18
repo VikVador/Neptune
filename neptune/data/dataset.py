@@ -24,6 +24,7 @@ from neptune.data import (
     DATASET_DATES_VALIDATION,
     DATASET_REGION,
     DATASET_VARIABLES,
+    DATASET_VARIABLES_OCEAN,
     VARIABLES_CLIPPING,
 )
 from neptune.data.tools import assert_date_format, generate_paths
@@ -146,25 +147,31 @@ class NeptuneDataset(Dataset):
             missing = [v for v in DATASET_VARIABLES if v not in ds]
             if missing:
                 raise KeyError(f"ERROR - Missing required variables: {missing}")
-            ds = ds[DATASET_VARIABLES]
-            ds = ds.isel(**DATASET_REGION)
-            ds = ds.isel(time_counter=0)
+
+            # Extracting partial region and variables
+            ds = ds[DATASET_VARIABLES].isel(
+                x=DATASET_REGION["x"],
+                y=DATASET_REGION["y"],
+                time_counter=0,
+            )
+
+            # Extracting depth for ocean variables
+            z_slice = DATASET_REGION["z"]
+            for var in DATASET_VARIABLES_OCEAN:
+                if var in ds:
+                    depth_dim = next((d for d in ds[var].dims if d.startswith("depth")), None)
+                    if depth_dim:
+                        ds[var] = ds[var].isel({depth_dim: z_slice})
+
+            # Loading into memory
             ds.load()
 
-        # Unify depth dimension (depthu, depthv → deptht)
-        for var, old_dim in [("uo", "depthu"), ("vo", "depthv")]:
-            if var in ds and old_dim in ds[var].dims:
-                ds[var] = xr.DataArray(
-                    ds[var].values, dims=["deptht", "y", "x"], attrs=ds[var].attrs
-                )
-        ds = ds.drop_vars(["depthu", "depthv"], errors="ignore")
-
-        # Clip physical bounds (values outside bounds are clipped to the bound)
+        # Clip physical bounds
         for var, (lo, hi) in VARIABLES_CLIPPING.items():
             if var in ds:
                 ds[var] = ds[var].clip(min=lo, max=hi)
 
-        # Stack all variables into channels → (C, Y, X)
+        # Stack all variables into channels
         channels = []
         for var in DATASET_VARIABLES:
             if var not in ds:
