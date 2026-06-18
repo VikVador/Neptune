@@ -148,17 +148,14 @@ class NeptuneDataset(Dataset):
             if missing:
                 raise KeyError(f"ERROR - Missing required variables: {missing}")
 
-            # Extracting partial region and variables
-            ds = ds[DATASET_VARIABLES].isel(
-                x=DATASET_REGION["x"],
-                y=DATASET_REGION["y"],
-                time_counter=0,
+            # Extracting partial domain
+            ds = (
+                ds[DATASET_VARIABLES]
+                .isel(x=DATASET_REGION["x"], y=DATASET_REGION["y"], time_counter=0)
+                .load()
             )
 
-            # Loading into memory to avoid lazy evaluation issues
-            ds.load()
-
-        # Extracting depth region
+        # Extracting levels
         z_slice = DATASET_REGION["z"]
         channels = []
         for var in DATASET_VARIABLES:
@@ -176,17 +173,11 @@ class NeptuneDataset(Dataset):
             else:
                 channels.append(data)
 
-        # Staking levels into a single dimension channel
+        # Preprocessing
         sample = torch.stack(channels, dim=0)
-
-        # Replace statistical outliers channel-wise with the channel mean
         sample = self.replace_outliers(sample)
-
-        # Standardize channel-wise
         if self.standardized:
             sample = self.standardize(sample)
-
-        # Mask land
         if self.fill_with_nans:
             return sample.masked_fill(self.mask_tensor == 0, float("nan"))
         return sample.nan_to_num(0.0) * self.mask_tensor
