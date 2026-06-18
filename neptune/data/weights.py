@@ -198,7 +198,7 @@ def get_weights_loss(
 
     w_ocean_phy = _column_weights(dpt_phys)
     w_ocean_bio = _column_weights(dpt_bio)
-    w_surface = mask[0]
+    w_surface = w_ocean_phy[0]
 
     channels = []
     for var in DATASET_VARIABLES:
