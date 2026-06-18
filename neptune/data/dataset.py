@@ -155,32 +155,28 @@ class NeptuneDataset(Dataset):
                 time_counter=0,
             )
 
-            # Extracting depth for ocean variables
-            z_slice = DATASET_REGION["z"]
-            for var in DATASET_VARIABLES_OCEAN:
-                if var in ds:
-                    depth_dim = next((d for d in ds[var].dims if d.startswith("depth")), None)
-                    if depth_dim:
-                        ds[var] = ds[var].isel({depth_dim: z_slice})
-
-            # Loading into memory
+            # Loading into memory to avoid lazy evaluation issues
             ds.load()
 
-        # Clip physical bounds
-        for var, (lo, hi) in VARIABLES_CLIPPING.items():
-            if var in ds:
-                ds[var] = ds[var].clip(min=lo, max=hi)
-
-        # Stack all variables into channels
+        # Extracting depth region
+        z_slice = DATASET_REGION["z"]
         channels = []
         for var in DATASET_VARIABLES:
-            if var not in ds:
-                raise KeyError(f"ERROR - Missing required variable: {var}")
-            data = torch.as_tensor(ds[var].values.copy(), dtype=torch.float32)
+            da = ds[var]
+            if var in VARIABLES_CLIPPING:
+                lo, hi = VARIABLES_CLIPPING[var]
+                da = da.clip(min=lo, max=hi)
+            if var in DATASET_VARIABLES_OCEAN:
+                depth_dim = next((d for d in da.dims if d.startswith("depth")), None)
+                if depth_dim:
+                    da = da.isel({depth_dim: z_slice})
+            data = torch.as_tensor(da.values.copy(), dtype=torch.float32)
             if data.ndim == 3:
                 channels.extend(data.unbind(0))
             else:
                 channels.append(data)
+
+        # Staking levels into a single dimension channel
         sample = torch.stack(channels, dim=0)
 
         # Replace statistical outliers channel-wise with the channel mean
