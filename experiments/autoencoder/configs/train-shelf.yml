@@ -5,12 +5,12 @@ WandB:
 
 Cluster:
   "account"       : ["bsmfc"]
-  "partition"     : ["gpu"]
+  "partition"     : ["ia"]
   "time"          : ["48:00:00"]
-  "nodes"         : [8]
-  "cpus-per-node" : [32]
-  "gpus-per-node" : [4]
-  "ram-per-node"  : ["240GB"]
+  "nodes"         : [2]
+  "cpus-per-node" : [64]
+  "gpus-per-node" : [8]
+  "ram-per-node"  : ["480GB"]
 
 Autoencoder:
   state:
@@ -20,9 +20,9 @@ Autoencoder:
   architecture:
     "checkpointing" : [true]
     "dropout"       : [0.0]
-    "hid_blocks"    : [[3, 3, 3, 3, 3]]
-    "hid_channels"  : [[512, 512, 1024, 1024, 1024]]
-    "lat_channels"  : [512]
+    "hid_blocks"    : [[3, 3, 3, 3]]
+    "hid_channels"  : [[512, 1024, 1024, 1024]]
+    "lat_channels"  : [64]
     "kernel_size"   : [3]
     "stride"        : [2]
     "ffn_factor"    : [1]
@@ -31,7 +31,7 @@ Autoencoder:
     "steps_update"        : [125000]
     "steps_saving"        : [25]
     "steps_logging"       : [10]
-    "batch_size_per_gpu"  : [4]
+    "batch_size_per_gpu"  : [8]
     "batch_size_per_step" : [128]
     "num_workers"         : [4]
     "prefetch_factor"     : [1]
