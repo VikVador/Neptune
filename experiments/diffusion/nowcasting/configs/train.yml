@@ -20,7 +20,7 @@ Diffusion:
 
   architecture:
     "checkpointing"   : [false]
-    "dropout"         : [0.05]
+    "dropout"         : [0.0]
     "enc_features"    : [64]
     "hid_blocks"      : [16]
     "hid_channels"    : [1024]
@@ -40,7 +40,7 @@ Diffusion:
     "batch_size_per_step" : [512]
     "num_workers"         : [4]
     "prefetch_factor"     : [1]
-    "learning_rate_start" : [0.00020]
-    "learning_rate_peak"  : [0.00070]
-    "learning_rate_end"   : [0.00001]
+    "learning_rate_start" : [0.000010]
+    "learning_rate_peak"  : [0.000200]
+    "learning_rate_end"   : [0.000001]
     "warmup_steps"        : [1000]
