@@ -27,8 +27,14 @@ from neptune.data import (
     DATASET_VARIABLES_OCEAN,
     VARIABLES_CLIPPING,
 )
-from neptune.data.tools import assert_date_format, generate_paths
-from neptune.data.weights import get_weights_state_mask, get_weights_stats
+from neptune.data.tools import (
+    assert_date_format,
+    generate_paths,
+)
+from neptune.data.weights import (
+    get_weights_state_mask,
+    get_weights_stats,
+)
 
 
 class NeptuneDataset(Dataset):
@@ -37,7 +43,7 @@ class NeptuneDataset(Dataset):
     Arguments:
         date_start     : Start date of the split (format: 'YYYY-MM-DD').
         date_end       : End date of the split (format: 'YYYY-MM-DD').
-        standardized   : If True, standardize each channel using precomputed statistics.
+        standardized   : If True, standardize each channel using statistics.
         fill_with_nans : If True, land pixels are set to NaN instead of 0.
     """
 
@@ -80,8 +86,8 @@ class NeptuneDataset(Dataset):
             idx: Index into the dates list.
 
         Returns:
-            sample: Tensor of shape (C, Y, X).
-            date:   Date string 'YYYY-MM-DD'.
+            x : Tensor of shape (C, Y, X).
+            d : Date string 'YYYY-MM-DD'.
         """
         date = self.dates[idx]
         return self.preprocess(date), date
@@ -208,14 +214,31 @@ def _load_latent_split(checkpoint_name: str, split: str) -> tuple[Tensor, list[s
     return (torch.load(latent_file, weights_only=True), torch.load(dates_file, weights_only=False))
 
 
+def _get_latent_stats(checkpoint_name: str) -> tuple[Tensor, Tensor]:
+    r"""Compute per-channel mean and std from the training latents.
+
+    Arguments:
+        checkpoint_name : Autoencoder name (directory under PATH_EXP_AE_LATENTS).
+
+    Returns:
+        mean : Per-channel mean (C, 1, 1).
+        std  : Per-channel std (C, 1, 1).
+    """
+    latents, _ = _load_latent_split(checkpoint_name, "train")
+    mean = latents.mean(dim=(0, 2, 3), keepdim=True).squeeze(0)
+    std = latents.std(dim=(0, 2, 3), keepdim=True).squeeze(0)
+    return mean, std
+
+
 class NeptuneForecastLatentDataset(Dataset):
     r"""Dataset returning (past, future) latent pairs for forecasting training.
 
     Arguments:
         checkpoint_name : Autoencoder name (directory under PATH_EXP_AE_LATENTS).
         split           : Dataset split ("train", "validation" or "test").
-        input_size      : Number of past timesteps in the input window  (T_input).
-        output_size     : Number of future timesteps in the output window (T_output).
+        input_size      : Number of past timesteps in the input window  (T_in).
+        output_size     : Number of future timesteps in the output window (T_out).
+        standardized    : If True, standardize latents channel-wise using statistics.
     """
 
     def __init__(
@@ -224,12 +247,17 @@ class NeptuneForecastLatentDataset(Dataset):
         split: str,
         input_size: int,
         output_size: int,
+        standardized: bool = True,
     ) -> None:
         super().__init__()
 
         self.latents, self.dates = _load_latent_split(checkpoint_name, split)
         self.input_size = input_size
         self.output_size = output_size
+
+        self.mean, self.std = _get_latent_stats(checkpoint_name)
+        if standardized:
+            self.latents = (self.latents - self.mean) / self.std
 
         n_total = len(self.latents)
         self._n = n_total - input_size - output_size + 1
@@ -239,6 +267,32 @@ class NeptuneForecastLatentDataset(Dataset):
                 f"Not enough timesteps ({n_total}) for "
                 f"input_size={input_size} + output_size={output_size}."
             )
+
+    def standardize(self, z: Tensor) -> Tensor:
+        r"""Standardize latents channel-wise using statistics.
+
+        Arguments:
+            z : Latent tensor of shape (*, C, H, W).
+
+        Returns:
+            z : Standardized tensor of the same shape.
+        """
+        mean = self.mean.to(z.device, dtype=z.dtype)
+        std = self.std.to(z.device, dtype=z.dtype)
+        return (z - mean) / std
+
+    def unstandardize(self, z: Tensor) -> Tensor:
+        r"""Reverse the channel-wise standardization.
+
+        Arguments:
+            z : Standardized latent tensor of shape (*, C, H, W).
+
+        Returns:
+            z : Tensor in original latent units, same shape.
+        """
+        mean = self.mean.to(z.device, dtype=z.dtype)
+        std = self.std.to(z.device, dtype=z.dtype)
+        return z * std + mean
 
     def __len__(self) -> int:
         return self._n
@@ -250,10 +304,10 @@ class NeptuneForecastLatentDataset(Dataset):
             idx : Sample index.
 
         Returns:
-            z_in      : Input latents,  shape (T_input,  C, H, W).
-            z_out     : Output latents, shape (T_output, C, H, W).
-            dates_in  : Date strings for each input  timestep, length T_input.
-            dates_out : Date strings for each output timestep, length T_output.
+            z_in  : Input latents (T_in,  C, H, W).
+            z_out : Output latents (T_out, C, H, W).
+            d_in  : Date strings for each input  timestep (D_in).
+            d_out : Date strings for each output timestep (D_out).
         """
         t = idx + self.input_size - 1
         z_in = self.latents[t - self.input_size + 1 : t + 1]
@@ -270,6 +324,7 @@ class NeptuneBlanketLatentDataset(Dataset):
         checkpoint_name : Autoencoder name (directory under PATH_EXP_AE_LATENTS).
         split           : Dataset split ("train", "validation" or "test").
         blanket_size    : Number of consecutive timesteps per sample.
+        standardized    : If True, standardize latents channel-wise using statistics.
     """
 
     def __init__(
@@ -277,11 +332,16 @@ class NeptuneBlanketLatentDataset(Dataset):
         checkpoint_name: str,
         split: str,
         blanket_size: int,
+        standardized: bool = True,
     ) -> None:
         super().__init__()
 
         self.latents, self.dates = _load_latent_split(checkpoint_name, split)
         self.blanket_size = blanket_size
+
+        self.mean, self.std = _get_latent_stats(checkpoint_name)
+        if standardized:
+            self.latents = (self.latents - self.mean) / self.std
 
         self._n = len(self.latents) - blanket_size + 1
 
@@ -289,6 +349,32 @@ class NeptuneBlanketLatentDataset(Dataset):
             raise ValueError(
                 f"Not enough timesteps ({len(self.latents)}) for blanket_size={blanket_size}."
             )
+
+    def standardize(self, z: Tensor) -> Tensor:
+        r"""Standardize latents channel-wise using statistics.
+
+        Arguments:
+            z : Latent tensor of shape (*, C, H, W).
+
+        Returns:
+            z : Standardized tensor of the same shape.
+        """
+        mean = self.mean.to(z.device, dtype=z.dtype)
+        std = self.std.to(z.device, dtype=z.dtype)
+        return (z - mean) / std
+
+    def unstandardize(self, z: Tensor) -> Tensor:
+        r"""Reverse the channel-wise standardization.
+
+        Arguments:
+            z : Standardized latent tensor of shape (*, C, H, W).
+
+        Returns:
+            z : Tensor in original latent units, same shape.
+        """
+        mean = self.mean.to(z.device, dtype=z.dtype)
+        std = self.std.to(z.device, dtype=z.dtype)
+        return z * std + mean
 
     def __len__(self) -> int:
         return self._n
@@ -300,8 +386,8 @@ class NeptuneBlanketLatentDataset(Dataset):
             idx : Sample index.
 
         Returns:
-            z     : Latent sequence, shape (blanket_size, C, H, W).
-            dates : Date strings for each timestep, length blanket_size.
+            z     : Latent sequence (T_blanket, C, H, W).
+            dates : Date strings for each timesteps (D).
         """
         z = self.latents[idx : idx + self.blanket_size]
         dates = self.dates[idx : idx + self.blanket_size]
@@ -338,6 +424,7 @@ def get_forecast_latent_datasets(
     checkpoint_name: str,
     input_size: int,
     output_size: int,
+    standardized: bool = True,
 ) -> tuple[
     NeptuneForecastLatentDataset, NeptuneForecastLatentDataset, NeptuneForecastLatentDataset
 ]:
@@ -347,6 +434,7 @@ def get_forecast_latent_datasets(
         checkpoint_name : Autoencoder name (directory under PATH_EXP_AE_LATENTS).
         input_size      : Number of past timesteps in the input window.
         output_size     : Number of future timesteps in the output window.
+        standardized    : If True, standardize latents channel-wise using statistics.
 
     Returns:
         train : Training dataset.
@@ -357,6 +445,7 @@ def get_forecast_latent_datasets(
         "checkpoint_name": checkpoint_name,
         "input_size": input_size,
         "output_size": output_size,
+        "standardized": standardized,
     }
     return (
         NeptuneForecastLatentDataset(split="train", **kwargs),
@@ -368,12 +457,14 @@ def get_forecast_latent_datasets(
 def get_blanket_latent_datasets(
     checkpoint_name: str,
     blanket_size: int,
+    standardized: bool = True,
 ) -> tuple[NeptuneBlanketLatentDataset, NeptuneBlanketLatentDataset, NeptuneBlanketLatentDataset]:
     r"""Create train, validation and test blanket latent datasets.
 
     Arguments:
         checkpoint_name : Autoencoder name (directory under PATH_EXP_AE_LATENTS).
         blanket_size    : Number of consecutive timesteps per sample.
+        standardized    : If True, standardize latents channel-wise using statistics.
 
     Returns:
         train : Training dataset.
@@ -383,6 +474,7 @@ def get_blanket_latent_datasets(
     kwargs: dict = {
         "checkpoint_name": checkpoint_name,
         "blanket_size": blanket_size,
+        "standardized": standardized,
     }
     return (
         NeptuneBlanketLatentDataset(split="train", **kwargs),

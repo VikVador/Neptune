@@ -79,7 +79,7 @@ class LatentViT(ViT):
         r"""Convert date strings to a spatial progress-of-year conditioning tensor.
 
         Arguments:
-            dates  : List of date strings in 'YYYY-MM-DD' format.
+            dates  : Date strings in 'YYYY-MM-DD' format (D).
             H      : Spatial height of the latent grid.
             W      : Spatial width of the latent grid.
             device : Target device.
@@ -100,12 +100,12 @@ class LatentViT(ViT):
         r"""Forward denoise a noisy state given diffusion time and optional conditioning.
 
         Arguments:
-            x    : Noisy latent (B, C_in, H, W).
+            x    : Noisy latent z (B, C, H, W).
             mod  : Modulation tensor (B,).
-            cond : Conditioning tensor(s) (B, C_*, H, W).
+            cond : Conditioning tensor(s) (B, *, H, W).
 
         Returns:
-            out : Denoised latent, shape (B, C, H, W).
+            out : Denoised latent (B, C, H, W).
         """
 
         # Merge list of conditioning tensors into a single spatial tensor along channels

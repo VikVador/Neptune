@@ -113,6 +113,7 @@ def training(
         prefetch_factor = prefetch_factor,
         get_datasets_fn = get_blanket_latent_datasets,
         blanket_size    = 1,
+        standardized    = True,
         batches         = batches,
         shuffle         = [True, False, False],
         infinite        = [True, False, False],
@@ -123,7 +124,7 @@ def training(
     )
 
     # Infering latent shape from a sample
-    _ds_tmp             = get_blanket_latent_datasets(ae_checkpoint_name, blanket_size=1)[0]
+    _ds_tmp             = get_blanket_latent_datasets(ae_checkpoint_name, blanket_size=1, standardized=True)[0]
     C_LAT, X_LAT, Y_LAT = _ds_tmp[0][0].shape[1:]
     del _ds_tmp
 
