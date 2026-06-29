@@ -182,4 +182,4 @@ def load(path: Path | str, device: str = "cpu",) -> LatentViT:
 
     state = torch.load(path / "model.pth", map_location=device, weights_only=True)
     backbone.load_state_dict(state)
-    return backbone.eval()
+    return backbone.to(device).eval()
