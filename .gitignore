@@ -22,10 +22,10 @@ wandb/
 .dawgz/
 scripts/wandb/
 scripts/.dawgz/
-experiments/autoencoder/wandb/
-experiments/autoencoder/.dawgz/
-experiments/autoencoder/**/*.png
-experiments/autoencoder/**/*.pdf
+experiments/encoder/wandb/
+experiments/encoder/.dawgz/
+experiments/encoder/**/*.png
+experiments/encoder/**/*.pdf
 experiments/diffusion/wandb/
 experiments/diffusion/.dawgz/
 experiments/diffusion/**/*.png
