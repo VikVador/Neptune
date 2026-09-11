@@ -1,7 +1,7 @@
 [project]
 name = "neptune"
-version = "0.0.1"
-description = "A latent diffusion-based emulator of the Black Sea"
+version = "1.0.0"
+description = "A latent generative emulator of the Black Sea Forecast Operational Model."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
