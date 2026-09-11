@@ -20,7 +20,9 @@ from neptune.data import (
     DATASET_REGION,
     DATASET_VARIABLES,
     DATASET_VARIABLES_OCEAN,
+    DATASET_VARIABLES_SURFACE,
     VARIABLES_CLIPPING,
+    Z,
 )
 from neptune.data.tools import (
     assert_date_format,
@@ -36,10 +38,11 @@ class NeptuneDataset(Dataset):
     r"""Creates a Neptune dataset.
 
     Arguments:
-        date_start     : Start date of the split (format: 'YYYY-MM-DD').
-        date_end       : End date of the split (format: 'YYYY-MM-DD').
+        date_start     : Start date of the date range (format: 'YYYY-MM-DD').
+        date_end       : End date of the date range (format: 'YYYY-MM-DD').
         standardized   : If True, standardize each channel using statistics.
         fill_with_nans : If True, land pixels are set to NaN instead of 0.
+        split          : If True, split the output into surface and ocean variables.
     """
 
     def __init__(
@@ -48,6 +51,7 @@ class NeptuneDataset(Dataset):
         date_end: str,
         standardized: bool = True,
         fill_with_nans: bool = False,
+        split: bool = True,
     ) -> None:
         super().__init__()
 
@@ -56,6 +60,7 @@ class NeptuneDataset(Dataset):
 
         self.standardized = standardized
         self.fill_with_nans = fill_with_nans
+        self.split_output = split
         self.mask_tensor = get_weights_state_mask()
         self.mean_tensor, self.std_tensor = get_weights_stats()
 
@@ -74,18 +79,54 @@ class NeptuneDataset(Dataset):
         r"""Return the number of valid dates in the split."""
         return len(self.dates)
 
-    def __getitem__(self, idx: int) -> tuple[Tensor, str]:
-        r"""Return a preprocessed sample and its associated date.
+    def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, str] | tuple[Tensor, str]:
+        r"""Return a preprocessed sample and its date, split by default into surface/ocean variables.
 
         Arguments:
             idx: Index into the dates list.
 
         Returns:
-            x : Tensor of shape (C, Y, X).
-            d : Date string 'YYYY-MM-DD'.
+            x_s : Surface variables (C_s, Y, X) (Only if split is True).
+            x_o : Ocean 3D variables (C_o, Z, Y, X) (Only if split is True).
+            x   : Stacked variables (C, Y, X) (Only if split is False).
+            d   : Date string 'YYYY-MM-DD'.
         """
         date = self.dates[idx]
-        return self.preprocess(date), date
+        x = self.preprocess(date)
+        if self.split_output:
+            x_s, x_o = self.split(x)
+            return x_s, x_o, date
+        return x, date
+
+    def split(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        r"""Split a stacked sample into surface and ocean 3D variables.
+
+        Arguments:
+            x : Input tensor (..., C, Y, X).
+
+        Returns:
+            x_s : Surface variables (..., C_s, Y, X).
+            x_o : Ocean 3D variables (..., C_o, Z, Y, X).
+        """
+        n_surface = len(DATASET_VARIABLES_SURFACE)
+        n_ocean = len(DATASET_VARIABLES_OCEAN)
+        x_s = x[..., :n_surface, :, :]
+        x_o = x[..., n_surface:, :, :].reshape(*x.shape[:-3], n_ocean, Z, *x.shape[-2:])
+        return x_s, x_o
+
+    def unsplit(self, x_s: Tensor, x_o: Tensor) -> Tensor:
+        r"""Merge surface and ocean 3D variables back into a stacked sample.
+
+        Arguments:
+            x_s : Surface variables (..., C_s, Y, X).
+            x_o : Ocean 3D variables (..., C_o, Z, Y, X).
+
+        Returns:
+            x : Output Tensor (..., C, Y, X).
+        """
+        n_ocean = len(DATASET_VARIABLES_OCEAN)
+        x_o_flat = x_o.reshape(*x_o.shape[:-4], n_ocean * Z, *x_o.shape[-2:])
+        return torch.cat([x_s, x_o_flat], dim=-3)
 
     def standardize(self, data: Tensor) -> Tensor:
         r"""Standardize a sample channel-wise using precomputed statistics.

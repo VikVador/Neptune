@@ -6,6 +6,7 @@ import torch
 from neptune.data import (
     DATASET_DATES_TRAINING,
     DATASET_VARIABLES,
+    DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     VARIABLES_CLIPPING,
     C,
@@ -83,7 +84,7 @@ def test_init_valid() -> None:
 @pytest.mark.integration
 def test_preprocess_shape() -> None:
     r"""Determines if a preprocessed sample has the expected shape (C, Y, X)."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
     sample, _ = ds[3]
     assert sample.shape == (C, Y, X)
 
@@ -91,7 +92,7 @@ def test_preprocess_shape() -> None:
 @pytest.mark.integration
 def test_preprocess_dtype() -> None:
     r"""Determines if a preprocessed sample has dtype float32."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
     sample, _ = ds[3]
     assert sample.dtype == torch.float32
 
@@ -99,7 +100,7 @@ def test_preprocess_dtype() -> None:
 @pytest.mark.integration
 def test_preprocess_no_nan() -> None:
     r"""Determines if a preprocessed sample (fill_with_nans=False) contains no NaN."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
     sample, _ = ds[3]
     assert not sample.isnan().any()
 
@@ -107,7 +108,7 @@ def test_preprocess_no_nan() -> None:
 @pytest.mark.integration
 def test_preprocess_land_zero() -> None:
     r"""Determines if land pixels are zero when fill_with_nans is False."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
     sample, _ = ds[3]
     mask = get_weights_state_mask()
     assert (sample[mask == 0] == 0).all()
@@ -116,7 +117,7 @@ def test_preprocess_land_zero() -> None:
 @pytest.mark.integration
 def test_preprocess_clipping() -> None:
     r"""Determines if physically clipped variables have no negative values."""
-    ds_raw = NeptuneDataset(*DATASET_DATES_TRAINING, standardized=False)
+    ds_raw = NeptuneDataset(*DATASET_DATES_TRAINING, standardized=False, split=False)
     sample_raw, _ = ds_raw[3]
     clipped_channels = []
     ch = 0
@@ -131,7 +132,7 @@ def test_preprocess_clipping() -> None:
 @pytest.mark.integration
 def test_fill_with_nans() -> None:
     r"""Determines if land pixels are NaN when fill_with_nans is True."""
-    ds_nan = NeptuneDataset(*DATASET_DATES_TRAINING, fill_with_nans=True)
+    ds_nan = NeptuneDataset(*DATASET_DATES_TRAINING, fill_with_nans=True, split=False)
     sample, _ = ds_nan[3]
     mask = get_weights_state_mask()
     assert sample[mask == 0].isnan().all()
@@ -144,3 +145,28 @@ def test_get_datasets_lengths() -> None:
     assert len(train) > 0
     assert len(val) > 0
     assert len(test) > 0
+
+
+@pytest.mark.integration
+def test_getitem_split_default() -> None:
+    r"""Determines if __getitem__ returns (x_s, x_o, date) by default, with the expected shapes."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    x_s, x_o, date = ds[3]
+    n_surface = len(DATASET_VARIABLES_SURFACE)
+    n_ocean = len(DATASET_VARIABLES_OCEAN)
+    assert x_s.shape == (n_surface, Y, X)
+    assert x_o.shape == (n_ocean, Z, Y, X)
+    assert isinstance(date, str)
+
+
+@pytest.mark.integration
+def test_split_unsplit_roundtrip() -> None:
+    r"""Determines if unsplit(split(x)) returns the original stacked sample, unbatched and batched."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
+    sample, _ = ds[3]
+    x_s, x_o = ds.split(sample)
+    assert torch.equal(ds.unsplit(x_s, x_o), sample)
+
+    batch = torch.stack([sample, sample])
+    x_s_b, x_o_b = ds.split(batch)
+    assert torch.equal(ds.unsplit(x_s_b, x_o_b), batch)
