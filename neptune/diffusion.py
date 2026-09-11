@@ -2,19 +2,25 @@ r"""Neural network architecture and tools for latent diffusion."""
 
 __all__ = [
     "LatentViT",
+    "generate_forecast",
     "save",
     "load",
 ]
 
 import torch
 
+from azula.denoise import KarrasDenoiser
 from azula.nn.dit import DiT
 from azula.nn.layers import SineEncoding
 from azula.nn.vit import ViT
+from azula.noise import RectifiedSchedule
+from azula.sample import zABSampler
 from datetime import date as Date
+from datetime import timedelta
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 from torch import Tensor
+from tqdm import tqdm
 
 
 # fmt: off
@@ -140,6 +146,104 @@ class LatentViT(ViT):
         return x
 
 
+def _build_rolling_window(
+    cond: Tensor,
+    n_members: int,
+    device: torch.device,
+) -> tuple[Tensor, int, int, int]:
+    r"""Initialise the per-member autoregressive conditioning window on device.
+
+    Arguments:
+        cond      : Standardized latents (input_states, C, H, W) or (N, input_states, C, H, W).
+        n_members : Number of ensemble members.
+        device    : Target device.
+
+    Returns:
+        z_rolling : Tensor (N, input_states, C, H, W) on device.
+        C_lat     : Latent channel count.
+        H_lat     : Latent height.
+        W_lat     : Latent width.
+    """
+    if cond.ndim == 4:
+        _, C_lat, H_lat, W_lat = cond.shape
+        z_rolling = cond.unsqueeze(0).expand(n_members, -1, -1, -1, -1).clone().to(device)
+    elif cond.ndim == 5:
+        N_cond, _, C_lat, H_lat, W_lat = cond.shape
+        if N_cond != n_members:
+            raise ValueError(f"ERROR - cond has {N_cond} members but n_members={n_members}.")
+        z_rolling = cond.clone().to(device)
+    else:
+        raise ValueError(f"ERROR - cond must be 4D or 5D, got {cond.ndim}D.")
+    return z_rolling, C_lat, H_lat, W_lat
+
+
+@torch.no_grad()
+def generate_forecast(
+    backbone: LatentViT,
+    cond: Tensor,
+    date: str,
+    n_members: int,
+    n_days: int,
+    n_steps: int = 64,
+    alpha_min: float = 0.001,
+    sigma_min: float = 0.001,
+) -> Tensor:
+    r"""Generate an autoregressive latent diffusion ensemble forecast.
+
+    Arguments:
+        backbone  : Trained LatentViT backbone.
+        cond      : Standardized conditioning latents (input_states, C, H, W) or (N, input_states, C, H, W).
+        date      : Date of the last conditioning state ('YYYY-MM-DD') to initialize the forecast.
+        n_members : Number of ensemble members per forecast day.
+        n_days    : Forecast horizon (autoregressive steps).
+        n_steps   : Diffusion sampling steps per day.
+        alpha_min : RectifiedSchedule alpha_min.
+        sigma_min : RectifiedSchedule sigma_min.
+
+    Returns:
+        forecast : Standardized latent ensemble (T, N, C, H, W) on CPU.
+    """
+
+    # Retrieve device of diffusion backbone
+    device = next(backbone.parameters()).device
+
+    # Initialization of diffusion tools
+    schedule = RectifiedSchedule(alpha_min=alpha_min, sigma_min=sigma_min)
+    denoiser = KarrasDenoiser(backbone, schedule).to(device)
+    sampler  = zABSampler(denoiser, order=3, steps=n_steps, silent=True)
+
+    # Building conditioning window for autoregressive forecast
+    z_rolling, C_lat, H_lat, W_lat = _build_rolling_window(cond, n_members, device)
+
+    # Creating date tensors
+    t0             = Date.fromisoformat(date)
+    forecast_dates = [(t0 + timedelta(days=d + 1)).isoformat() for d in range(n_days)]
+
+    # Stores the forecasted latents
+    forecast = []
+
+    for forecast_date in tqdm(forecast_dates, desc="Forecast", unit="day"):
+
+        # Building progress-of-the-year conditioning
+        year_cond = LatentViT.day_of_year_to_conditioning([forecast_date] * n_members, H_lat, W_lat, device)
+        cond_t    = torch.cat([year_cond, z_rolling.flatten(1, 2)], dim=1)
+
+        # Sampling
+        z_new = sampler(torch.randn(n_members, C_lat, H_lat, W_lat, device=device), cond=cond_t)
+        forecast.append(z_new.cpu())
+
+        # Shift rolling window
+        z_rolling = z_rolling.roll(-1, dims=1)
+        z_rolling[:, -1] = z_new
+
+        # Cleanup
+        del year_cond, cond_t, z_new
+        torch.cuda.empty_cache()
+
+    # Return forecast tensor (T, N, C, H, W)
+    return torch.stack(forecast, dim=0).cpu()
+
+
 def save(backbone: LatentViT, config: DictConfig, path: Path | str,) -> None:
     r"""Save a diffusion backbone and its training configuration.
 
@@ -182,4 +286,4 @@ def load(path: Path | str, device: str = "cpu",) -> LatentViT:
 
     state = torch.load(path / "model.pth", map_location=device, weights_only=True)
     backbone.load_state_dict(state)
-    return backbone.eval()
+    return backbone.to(device).eval()

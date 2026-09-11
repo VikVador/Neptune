@@ -3,7 +3,7 @@ r"""Launch visualization of autoencoder diagnostics."""
 import argparse
 import dawgz
 
-from neptune.diagnostics.figures import (
+from neptune.diagnostics.autoencoder.figures import (
     visualize_error_maps_x,
     visualize_error_maps_y,
     visualize_error_maps_z,

@@ -1,7 +1,6 @@
 r"""Metrics for diagnosing autoencoders."""
 
 __all__ = [
-    "power_spectrum",
     "compute_and_save_power_spectra",
     "compute_and_save_se",
     "compute_and_save_stats_mse",
@@ -13,6 +12,7 @@ __all__ = [
 import dask
 import torch
 
+from albus.metrics import power_spectrum
 from shaggy.tools import load as s_load
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -24,57 +24,6 @@ from neptune.data.weights import get_weights_mask, get_weights_state_mask
 
 # fmt: off
 #
-def power_spectrum(
-    u: Tensor,
-    mask: Tensor | None = None,
-) -> Tensor:
-    r"""Compute the isotropic 2D power spectrum per channel, per batch element.
-
-    Arguments:
-        u    : State tensor of shape (B, C, Y, X).
-        mask : Ocean mask of shape (1, C, Y, X).
-
-    Returns:
-        spectrum : Isotropic power spectrum per sample per channel (B, C, K).
-    """
-
-    # Extract dimensions and device info
-    B, C_in, Y_in, X_in = u.shape
-    device = u.device
-
-    if mask is not None:
-        if mask.shape != (1, C_in, Y_in, X_in):
-            raise ValueError(f"Expected mask shape (1, {C_in}, {Y_in}, {X_in}), got {mask.shape}")
-        u = u.masked_fill(mask.expand_as(u) == 0, 0.0)
-    else:
-        u = u.nan_to_num(0.0)
-
-    # Computing 2D Fast Fourier Transform
-    fft = torch.fft.rfft2(u, norm="ortho")
-    psd = fft.real**2 + fft.imag**2
-
-    # Building radial frequency grid
-    ky     = torch.fft.fftfreq( Y_in, device=device) * Y_in
-    kx     = torch.fft.rfftfreq(X_in, device=device) * X_in
-    k_grid = torch.round(torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2)).long()
-    K      = int(min(Y_in, X_in)) // 2 + 1
-    k_flat = k_grid.clamp(0, K - 1).reshape(-1)
-
-    # Counting pixels per radial bin
-    count = torch.zeros(K, device=device)
-    count.scatter_add_(0, k_flat, torch.ones(k_flat.numel(), device=device))
-    count = count.clamp(min=1)
-
-    # Averaging power in each radial bin to get isotropic spectrum
-    psd_flat = psd.reshape(B, C_in, -1)
-    k_exp    = k_flat[None, None, :].expand(B, C_in, -1)
-    spectrum = torch.zeros(B, C_in, K, device=device)
-    spectrum.scatter_add_(dim=2, index=k_exp, src=psd_flat)
-    spectrum = spectrum / count[None, None, :]
-
-    return spectrum
-
-
 def _setup(checkpoint_name: str) -> tuple:
     r"""Shared initialisation for diagnostics functions.
 
@@ -136,8 +85,8 @@ def compute_and_save_power_spectra(
             _, x_hat = model(x_in)
 
             # Compute power spectra with mask applied (land → 0.0)
-            gt_list.append( power_spectrum(x,     mask=w_state_mask).cpu())
-            rec_list.append(power_spectrum(x_hat, mask=w_state_mask).cpu())
+            gt_list.append( power_spectrum(x,     dims="B C Y X", spatial="Y X", mask=w_state_mask).cpu())
+            rec_list.append(power_spectrum(x_hat, dims="B C Y X", spatial="Y X", mask=w_state_mask).cpu())
 
     # Saving results
     save_dir = PATH_DIAGNOSTICS / checkpoint_name / "power_spectra"

@@ -5,25 +5,25 @@ WandB:
 
 Cluster:
   "account"       : ["bsmfc"]
-  "partition"     : ["ia"]
+  "partition"     : ["gpu"]
   "time"          : ["48:00:00"]
-  "nodes"         : [1]
+  "nodes"         : [8]
   "cpus-per-node" : [32]
   "gpus-per-node" : [4]
   "ram-per-node"  : ["240GB"]
 
 Diffusion:
   state:
-    "checkpoint_name_ae"      : ["CAE__ic512_lc256_st4_cf484__2FC7_92A3"]
+    "checkpoint_name_ae"      : ["CAE__ic512_lc512_st4_cf242__086D_F3A1"]
     "checkpoint_name_diff_fc" : [null]
     "saving"                  : [true]
 
   architecture:
-    "checkpointing"   : [false]
+    "checkpointing"   : [true]
     "dropout"         : [0.0]
     "input_states"    : [2]
     "output_states"   : [1]
-    "enc_features"    : [64]
+    "enc_features"    : [256]
     "hid_blocks"      : [16]
     "hid_channels"    : [1024]
     "patch_size"      : [1]
@@ -35,14 +35,14 @@ Diffusion:
     "sigma_min" : [0.001]
 
   training:
-    "steps_update"        : [125000]
-    "steps_saving"        : [100]
-    "steps_logging"       : [25]
+    "steps_update"        : [1000000]
+    "steps_saving"        : [200]
+    "steps_logging"       : [50]
     "batch_size_per_gpu"  : [128]
-    "batch_size_per_step" : [512]
+    "batch_size_per_step" : [4096]
     "num_workers"         : [4]
     "prefetch_factor"     : [1]
     "learning_rate_start" : [0.000010]
     "learning_rate_peak"  : [0.000200]
     "learning_rate_end"   : [0.000001]
-    "warmup_steps"        : [1000]
+    "warmup_steps"        : [5000]

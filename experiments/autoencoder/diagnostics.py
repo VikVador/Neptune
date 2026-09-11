@@ -6,7 +6,7 @@ from dawgz import after, job, schedule
 
 from neptune.config import PATH_DIAGNOSTICS
 from neptune.data.tools import build_windows
-from neptune.diagnostics.metrics import (
+from neptune.diagnostics.autoencoder.metrics import (
     clean_se,
     compute_and_save_maps,
     compute_and_save_power_spectra,
