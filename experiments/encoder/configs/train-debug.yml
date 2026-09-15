@@ -1,7 +1,7 @@
 WandB:
     "entity"  : ["neptuneAI"]
     "project" : ["neptune-ae-debug"]
-    "mode"    : ["disabled"]
+    "mode"    : ["online"]
 
 Cluster:
   "account"       : ["bsmfc"]
@@ -12,30 +12,45 @@ Cluster:
   "gpus-per-node" : [1]
   "ram-per-node"  : ["60GB"]
 
-Autoencoder:
-  state:
-    "checkpoint_name" : [null]
-    "saving"          : [false]
+State:
+    "saving"                  : [false]
+    "checkpointing"           : [true]
+    "checkpoint_name_surface" : [null]
+    "checkpoint_name_ocean"   : [null]
 
-  architecture:
-    "checkpointing" : [false]
-    "dropout"       : [0.02]
-    "hid_blocks"    : [[1, 1, 1]]
-    "hid_channels"  : [[32, 64, 128]]
-    "lat_channels"  : [32]
-    "kernel_size"   : [3]
-    "stride"        : [2]
-    "ffn_factor"    : [1]
+Training:
+    "batch_size_per_step_surface" : [4]
+    "batch_size_per_step_ocean"   : [4]
+    "batch_size_per_gpu_surface"  : [2]
+    "batch_size_per_gpu_ocean"    : [2]
+    "steps_update"                : [128]
+    "steps_saving"                : [32]
+    "steps_logging"               : [4]
+    "num_workers"                 : [1]
+    "prefetch_factor"             : [1]
+    "learning_rate_start"         : [0.0005]
+    "learning_rate_peak"          : [0.0010]
+    "learning_rate_end"           : [0.0001]
+    "warmup_steps"                : [32]
 
-  training:
-    "steps_update"        : [128]
-    "steps_saving"        : [32]
-    "steps_logging"       : [4]
-    "batch_size_per_gpu"  : [1]
-    "batch_size_per_step" : [2]
-    "num_workers"         : [1]
-    "prefetch_factor"     : [1]
-    "learning_rate_start" : [0.0001]
-    "learning_rate_peak"  : [0.0005]
-    "learning_rate_end"   : [0.0001]
-    "warmup_steps"        : [16]
+Encoders:
+
+  Surface:
+    "hid_channels"        : [[16, 32, 64]]
+    "hid_blocks"          : [[3, 3, 3]]
+    "hid_groups"          : [[2, 1, 1]]
+    "lat_channels"        : [4]
+    "kernel_size"         : [3]
+    "stride"              : [2]
+    "ffn_factor"          : [1]
+    "dropout"             : [0.02]
+
+  Ocean:
+    "hid_channels"        : [[8, 16, 32]]
+    "hid_blocks"          : [[3, 3, 3]]
+    "hid_groups"          : [[2, 1, 1]]
+    "lat_channels"        : [4]
+    "kernel_size"         : [3]
+    "stride"              : [2]
+    "ffn_factor"          : [1]
+    "dropout"             : [0.02]

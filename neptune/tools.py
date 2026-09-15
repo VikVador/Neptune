@@ -46,32 +46,36 @@ def load_configuration(path: str | Path) -> list[dict[str, Any]]:
 
 
 def generate_run_name_ae(
+    joint_hash: str,
     in_channels: int,
     lat_channels: int,
     hid_channels: list[int],
     hid_blocks: list[int],
     stride: int,
+    spatial: int = 2,
     previous_run_name: str | None = None,
 ) -> str:
-    r"""Generate a descriptive WandB run name encoding the autoencoder architecture.
+    r"""Generate a descriptive WandB run name encoding the convolutional autoencoder architecture.
 
     Arguments:
+        joint_hash        : Hash shared by all encoders launched together.
         in_channels       : Number of physical input channels.
         lat_channels      : Number of latent channels.
         hid_channels      : List of hidden channels per stage.
         hid_blocks        : List of blocks per stage
         stride            : Spatial stride per stage.
+        spatial           : Number of spatial dimensions the stride is applied over.
         previous_run_name : WandB name of the resumed run, if any.
 
     Returns:
-        name : Run name of the form CAE_IC{}_LC{}_ST{}_CF{}_XXX[_YYY].
+        name : Run name of the form CAE_{joint_hash}_{spatial}D_ic{}_lc{}_st{}_cf{}__XXX[_YYY].
     """
     ic = hid_channels[0]
     lc = lat_channels
     st = len(hid_blocks) - 1
-    cf = round(stride ** (2 * st) * in_channels / lat_channels)
+    cf = round(stride ** (spatial * st) * in_channels / lat_channels)
     xxx = secrets.token_hex(2).upper()
-    name = f"CAE__ic{ic}_lc{lc}_st{st}_cf{cf}__{xxx}"
+    name = f"CAE_{joint_hash}_{spatial}D_ic{ic}_lc{lc}_st{st}_cf{cf}__{xxx}"
 
     if previous_run_name is not None:
         yyy = previous_run_name.split("__")[-1].split("_")[0]
