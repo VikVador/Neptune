@@ -1,6 +1,6 @@
 WandB:
     "entity"  : ["neptuneAI"]
-    "project" : ["neptune-ae-training"]
+    "project" : ["neptune-3D-encoder-training"]
     "mode"    : ["online"]
 
 Cluster:
@@ -19,9 +19,9 @@ State:
     "checkpoint_name_ocean"   : [null]
 
 Training:
-    "batch_size_per_step_surface" : [1024]
+    "batch_size_per_step_surface" : [512]
     "batch_size_per_step_ocean"   : [512]
-    "batch_size_per_gpu_surface"  : [32]
+    "batch_size_per_gpu_surface"  : [8]
     "batch_size_per_gpu_ocean"    : [4]
     "steps_update"                : [128000]
     "steps_saving"                : [32]

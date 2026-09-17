@@ -3,6 +3,7 @@ r"""A collection of tools for various tasks."""
 __all__ = [
     "load_configuration",
     "generate_run_name_ae",
+    "extract_model_hash",
     "get_wandb_hyperparameters",
 ]
 
@@ -78,10 +79,21 @@ def generate_run_name_ae(
     name = f"CAE_{joint_hash}_{spatial}D_ic{ic}_lc{lc}_st{st}_cf{cf}__{xxx}"
 
     if previous_run_name is not None:
-        yyy = previous_run_name.split("__")[-1].split("_")[0]
-        name = f"{name}_{yyy}"
+        name = f"{name}_{extract_model_hash(previous_run_name)}"
 
     return name
+
+
+def extract_model_hash(run_name: str) -> str:
+    r"""Extract the unique model-identifying hash from a run name.
+
+    Arguments:
+        run_name : Run name of the form ..._{spatial}D_..._cf{}__XXX[_YYY].
+
+    Returns:
+        hash : The XXX hash identifying this specific model.
+    """
+    return run_name.split("__")[-1].split("_")[0]
 
 
 def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
