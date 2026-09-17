@@ -14,7 +14,8 @@ from shaggy.loss import loss_geometry_embedding
 from shaggy.models.cae import ConvEncoder
 from shaggy.optimizers.gradients import safe_gradient_step
 from shaggy.optimizers.soap import SOAP
-from shaggy.tools import load_config, load_weights
+from shaggy.tools import load as s_load
+from shaggy.tools import load_config
 from shaggy.tools import save as s_save
 from torch.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -53,7 +54,7 @@ def _build_encoder(
     if checkpoint_name is not None:
         ckpt_path = PATH_MODELS / checkpoint_name
         config    = OmegaConf.to_container(load_config(ckpt_path))
-        encoder   = load_weights(ConvEncoder(**config), ckpt_path, device=str(device)).train()
+        encoder   = s_load(ckpt_path, ConvEncoder, device=str(device)).train()
     else:
         config = {
             "in_channels"  : in_channels,
