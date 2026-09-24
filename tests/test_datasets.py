@@ -5,31 +5,41 @@ import torch
 
 from neptune.data import (
     DATASET_DATES_TRAINING,
-    DATASET_VARIABLES,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     VARIABLES_CLIPPING,
-    C,
     X,
     Y,
     Z,
 )
 from neptune.data.dataset import NeptuneDataset, get_datasets
-from neptune.data.weights import get_weights_state_mask
+from neptune.data.weights import get_weights_mask
+
+C_S = len(DATASET_VARIABLES_SURFACE)
+C_O = len(DATASET_VARIABLES_OCEAN)
 
 
 @pytest.fixture()
 def tiny_ds(monkeypatch: pytest.MonkeyPatch) -> NeptuneDataset:
+    r"""Dataset over 10 fake consecutive days, with 2 surface and 3 ocean variables on 4 levels."""
     monkeypatch.setattr(
-        "neptune.data.dataset.get_weights_state_mask",
-        lambda: torch.ones(3, 8, 8),
+        "neptune.data.dataset.get_weights_mask",
+        lambda: (torch.ones(1, 8, 8), torch.ones(1, 4, 8, 8)),
     )
     monkeypatch.setattr(
         "neptune.data.dataset.get_weights_stats",
-        lambda: (torch.zeros(3, 1, 1), torch.ones(3, 1, 1)),
+        lambda: (
+            torch.zeros(2, 1, 1),
+            torch.ones(2, 1, 1),
+            torch.zeros(3, 4, 1, 1),
+            torch.ones(3, 4, 1, 1),
+        ),
     )
-    monkeypatch.setattr("neptune.data.dataset.generate_paths", lambda: {})
-    return NeptuneDataset("2000-01-01", "2000-12-31")
+    monkeypatch.setattr(
+        "neptune.data.dataset.generate_paths",
+        lambda: {"2000-01": [f"BS_1d_200001{d:02d}_grid_T.nc" for d in range(1, 11)]},
+    )
+    return NeptuneDataset("2000-01-01", "2000-01-10", input_states=2, output_states=3)
 
 
 def test_init_invalid_date() -> None:
@@ -38,135 +48,107 @@ def test_init_invalid_date() -> None:
         NeptuneDataset("01/01/1998", "01/01/2000")
 
 
-def test_standardize_3d(tiny_ds: NeptuneDataset) -> None:
-    r"""Determines if standardize returns the correct shape for a (C, Y, X) tensor."""
-    x = torch.randn(3, 8, 8)
-    assert tiny_ds.standardize(x).shape == (3, 8, 8)
+def test_init_window_too_large(tiny_ds: NeptuneDataset) -> None:
+    r"""Determines if a window longer than the date range raises a ValueError."""
+    with pytest.raises(ValueError):
+        NeptuneDataset("2000-01-01", "2000-01-10", input_states=6, output_states=5)
 
 
-def test_standardize_4d(tiny_ds: NeptuneDataset) -> None:
-    r"""Determines if standardize returns the correct shape for a (B, C, Y, X) tensor."""
-    x = torch.randn(4, 3, 8, 8)
-    assert tiny_ds.standardize(x).shape == (4, 3, 8, 8)
+def test_len_windows(tiny_ds: NeptuneDataset) -> None:
+    r"""Determines if the number of windows is the number of dates minus the window length plus one."""
+    assert len(tiny_ds) == 10 - (2 + 3) + 1
+
+
+def test_getitem_window(tiny_ds: NeptuneDataset, monkeypatch: pytest.MonkeyPatch) -> None:
+    r"""Determines if a window returns N previous and K future consecutive states, with their dates."""
+
+    def _fake_preprocess(date: str) -> tuple[torch.Tensor, torch.Tensor]:
+        day = float(date[-2:])
+        return torch.full((2, 8, 8), day), torch.full((3, 4, 8, 8), day)
+
+    monkeypatch.setattr(tiny_ds, "preprocess", _fake_preprocess)
+    x_inp_s, x_inp_o, x_out_s, x_out_o, dates = tiny_ds[4]
+
+    assert x_inp_s.shape == (2, 2, 8, 8)
+    assert x_inp_o.shape == (2, 3, 4, 8, 8)
+    assert x_out_s.shape == (3, 2, 8, 8)
+    assert x_out_o.shape == (3, 3, 4, 8, 8)
+    assert dates == [f"2000-01-{d:02d}" for d in range(5, 10)]
+    assert x_inp_o[:, 0, 0, 0, 0].tolist() == [5.0, 6.0]
+    assert x_out_s[:, 0, 0, 0].tolist() == [7.0, 8.0, 9.0]
+
+
+def test_standardize_roundtrip(tiny_ds: NeptuneDataset) -> None:
+    r"""Determines if standardize followed by unstandardize is the identity, with a time dimension."""
+    x_s, x_o = torch.randn(5, 2, 8, 8), torch.randn(5, 3, 4, 8, 8)
+    y_s, y_o = tiny_ds.unstandardize(*tiny_ds.standardize(x_s, x_o))
+    assert torch.allclose(y_s, x_s)
+    assert torch.allclose(y_o, x_o)
 
 
 def test_replace_outliers(tiny_ds: NeptuneDataset) -> None:
-    r"""Determines if values beyond n_std are replaced by the channel mean and inliers remain unchanged."""
-    data = torch.zeros(3, 8, 8)
-    data[0, 0, 0] = 10.0  # above threshold → replaced by mean (0)
-    data[1, 0, 0] = -10.0  # below threshold → replaced by mean (0)
-    data[2, 0, 0] = 2.0  # within bounds  → unchanged
+    r"""Determines if values beyond n_std are replaced by the mean and inliers remain unchanged."""
+    x_s, x_o = torch.zeros(2, 8, 8), torch.zeros(3, 4, 8, 8)
+    x_s[0, 0, 0] = 10.0
+    x_s[1, 0, 0] = 2.0
+    x_o[2, 3, 0, 0] = -10.0
 
-    result = tiny_ds.replace_outliers(data, n_std=5.0)
+    y_s, y_o = tiny_ds.replace_outliers(x_s, x_o, n_std=5.0)
 
-    assert result[0, 0, 0] == 0.0
-    assert result[1, 0, 0] == 0.0
-    assert result[2, 0, 0] == 2.0
-
-
-def test_unstandardize_roundtrip(tiny_ds: NeptuneDataset) -> None:
-    r"""Determines if standardize followed by unstandardize is the identity."""
-    x = torch.randn(3, 8, 8)
-    assert torch.allclose(tiny_ds.unstandardize(tiny_ds.standardize(x)), x, rtol=1e-3, atol=1e-3)
+    assert y_s[0, 0, 0] == 0.0
+    assert y_s[1, 0, 0] == 2.0
+    assert y_o[2, 3, 0, 0] == 0.0
 
 
 @pytest.mark.integration
-def test_init_valid() -> None:
-    r"""Determines if the dataset loads the correct number of dates."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
-    expected = sorted(
-        d for d in ds.date_to_paths if DATASET_DATES_TRAINING[0] <= d <= DATASET_DATES_TRAINING[1]
-    )
-    assert len(ds) > 0
-    assert len(ds) == len(expected)
-
-
-@pytest.mark.integration
-def test_preprocess_shape() -> None:
-    r"""Determines if a preprocessed sample has the expected shape (C, Y, X)."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
-    sample, _ = ds[3]
-    assert sample.shape == (C, Y, X)
-
-
-@pytest.mark.integration
-def test_preprocess_dtype() -> None:
-    r"""Determines if a preprocessed sample has dtype float32."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
-    sample, _ = ds[3]
-    assert sample.dtype == torch.float32
-
-
-@pytest.mark.integration
-def test_preprocess_no_nan() -> None:
-    r"""Determines if a preprocessed sample (fill_with_nans=False) contains no NaN."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
-    sample, _ = ds[3]
-    assert not sample.isnan().any()
+def test_getitem_shapes() -> None:
+    r"""Determines if a real window has the expected shapes, dtype and dates."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING, input_states=2, output_states=1)
+    x_inp_s, x_inp_o, x_out_s, x_out_o, dates = ds[0]
+    assert x_inp_s.shape == (2, C_S, Y, X)
+    assert x_inp_o.shape == (2, C_O, Z, Y, X)
+    assert x_out_s.shape == (1, C_S, Y, X)
+    assert x_out_o.shape == (1, C_O, Z, Y, X)
+    assert x_inp_o.dtype == torch.float32
+    assert dates == ["1998-01-01", "1998-01-02", "1998-01-03"]
 
 
 @pytest.mark.integration
 def test_preprocess_land_zero() -> None:
-    r"""Determines if land pixels are zero when fill_with_nans is False."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
-    sample, _ = ds[3]
-    mask = get_weights_state_mask()
-    assert (sample[mask == 0] == 0).all()
+    r"""Determines if land pixels are zero and no NaN remains when fill_with_nans is False."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
+    x_s, x_o = ds.preprocess(ds.dates[3])
+    mask_surface, mask_ocean = get_weights_mask()
+    assert not x_s.isnan().any() and not x_o.isnan().any()
+    assert (x_s * (1 - mask_surface) == 0).all()
+    assert (x_o * (1 - mask_ocean) == 0).all()
+
+
+@pytest.mark.integration
+def test_preprocess_fill_with_nans() -> None:
+    r"""Determines if land pixels are NaN when fill_with_nans is True."""
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING, fill_with_nans=True)
+    x_s, x_o = ds.preprocess(ds.dates[3])
+    mask_surface, mask_ocean = get_weights_mask()
+    assert x_s[:, mask_surface[0] == 0].isnan().all()
+    assert x_o[:, mask_ocean[0] == 0].isnan().all()
 
 
 @pytest.mark.integration
 def test_preprocess_clipping() -> None:
     r"""Determines if physically clipped variables have no negative values."""
-    ds_raw = NeptuneDataset(*DATASET_DATES_TRAINING, standardized=False, split=False)
-    sample_raw, _ = ds_raw[3]
-    clipped_channels = []
-    ch = 0
-    for var in DATASET_VARIABLES:
-        n = 1 if var in DATASET_VARIABLES_SURFACE else Z
+    ds = NeptuneDataset(*DATASET_DATES_TRAINING, standardized=False)
+    x_s, x_o = ds.preprocess(ds.dates[3])
+    for i, var in enumerate(DATASET_VARIABLES_SURFACE):
         if var in VARIABLES_CLIPPING:
-            clipped_channels.extend(range(ch, ch + n))
-        ch += n
-    assert sample_raw[clipped_channels].min() >= 0
-
-
-@pytest.mark.integration
-def test_fill_with_nans() -> None:
-    r"""Determines if land pixels are NaN when fill_with_nans is True."""
-    ds_nan = NeptuneDataset(*DATASET_DATES_TRAINING, fill_with_nans=True, split=False)
-    sample, _ = ds_nan[3]
-    mask = get_weights_state_mask()
-    assert sample[mask == 0].isnan().all()
+            assert x_s[i].min() >= 0
+    for i, var in enumerate(DATASET_VARIABLES_OCEAN):
+        if var in VARIABLES_CLIPPING:
+            assert x_o[i].min() >= 0
 
 
 @pytest.mark.integration
 def test_get_datasets_lengths() -> None:
-    r"""Determines if train, validation, and test datasets all contain at least one sample."""
-    train, val, test = get_datasets()
-    assert len(train) > 0
-    assert len(val) > 0
-    assert len(test) > 0
-
-
-@pytest.mark.integration
-def test_getitem_split_default() -> None:
-    r"""Determines if __getitem__ returns (x_s, x_o, date) by default, with the expected shapes."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING)
-    x_s, x_o, date = ds[3]
-    n_surface = len(DATASET_VARIABLES_SURFACE)
-    n_ocean = len(DATASET_VARIABLES_OCEAN)
-    assert x_s.shape == (n_surface, Y, X)
-    assert x_o.shape == (n_ocean, Z, Y, X)
-    assert isinstance(date, str)
-
-
-@pytest.mark.integration
-def test_split_unsplit_roundtrip() -> None:
-    r"""Determines if unsplit(split(x)) returns the original stacked sample, unbatched and batched."""
-    ds = NeptuneDataset(*DATASET_DATES_TRAINING, split=False)
-    sample, _ = ds[3]
-    x_s, x_o = ds.split(sample)
-    assert torch.equal(ds.unsplit(x_s, x_o), sample)
-
-    batch = torch.stack([sample, sample])
-    x_s_b, x_o_b = ds.split(batch)
-    assert torch.equal(ds.unsplit(x_s_b, x_o_b), batch)
+    r"""Determines if train, validation and test datasets all contain at least one window."""
+    for ds in get_datasets(input_states=2, output_states=4):
+        assert len(ds) > 0

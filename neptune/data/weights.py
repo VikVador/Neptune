@@ -3,6 +3,7 @@ r"""Spatial masks, mesh and standardization statistics for the Black Sea dataset
 __all__ = [
     "get_weights_mask",
     "get_weights_mesh",
+    "get_weights_date",
     "get_weights_stats",
 ]
 
@@ -10,6 +11,7 @@ import numpy as np
 import torch
 import xarray as xr
 
+from datetime import date as Date
 from torch import Tensor
 
 from neptune.config import (
@@ -20,6 +22,8 @@ from neptune.data import (
     DATASET_REGION,
     DATASET_VARIABLES,
     DATASET_VARIABLES_SURFACE,
+    X,
+    Y,
     Z,
 )
 
@@ -163,6 +167,32 @@ def get_weights_mesh(
     ])
     mesh_surface = mesh_ocean[:4, 0].clone()
     return _prepare(mesh_surface, dim, device), _prepare(mesh_ocean, dim, device)
+
+
+def get_weights_date(
+    date: str,
+    *,
+    dim: int = 1,
+    device: torch.device | str | None = None,
+) -> tuple[Tensor, Tensor]:
+    r"""Encode the year progress of a date with sin/cos, broadcast to the surface and ocean grids.
+
+    Arguments:
+        date   : Date string 'YYYY-MM-DD'.
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
+        device : Target device ("cpu" or "cuda").
+
+    Returns:
+        date_surface : (sin, cos) of the year progress (2, Y, X).
+        date_ocean   : (sin, cos) of the year progress (2, Z, Y, X).
+    """
+    progress = Date.fromisoformat(date).timetuple().tm_yday / 366
+    angle = torch.tensor(2 * torch.pi * progress)
+    encoding = torch.stack([angle.sin(), angle.cos()])
+
+    date_surface = encoding[:, None, None].expand(2, Y, X)
+    date_ocean = encoding[:, None, None, None].expand(2, Z, Y, X)
+    return _prepare(date_surface, dim, device), _prepare(date_ocean, dim, device)
 
 
 def get_weights_stats(

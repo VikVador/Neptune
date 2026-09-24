@@ -73,8 +73,8 @@ def test_get_dataloaders_kwargs_forwarded(monkeypatch: pytest.MonkeyPatch) -> No
         return _make_tiny_dataset(), _make_tiny_dataset(), _make_tiny_dataset()
 
     monkeypatch.setattr("neptune.data.dataloader.get_datasets", _capturing_get_datasets)
-    get_dataloaders(batch_size=2, num_workers=0, prefetch_factor=1, standardized=False)
-    assert received.get("standardized") is False
+    get_dataloaders(batch_size=2, num_workers=0, prefetch_factor=1, input_states=2)
+    assert received.get("input_states") == 2
 
 
 def test_infinite_dataloader_yields_correct_count() -> None:

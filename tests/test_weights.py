@@ -13,6 +13,7 @@ from neptune.data import (
 from neptune.data.weights import (
     _encode_sin_cos,
     _prepare,
+    get_weights_date,
     get_weights_mask,
     get_weights_mesh,
     get_weights_stats,
@@ -80,6 +81,31 @@ def test_encode_sin_cos_typical() -> None:
 def test_encode_sin_cos_shape() -> None:
     r"""Determines if the encoding prepends a (sin, cos) dimension to any input shape."""
     assert _encode_sin_cos(torch.rand(3, 4, 5)).shape == (2, 3, 4, 5)
+
+
+def test_get_weights_date_shape() -> None:
+    r"""Determines if the date encoding is broadcast to the surface and ocean grids."""
+    date_surface, date_ocean = get_weights_date("2000-06-15")
+    assert date_surface.shape == (2, Y, X)
+    assert date_ocean.shape == (2, Z, Y, X)
+    assert torch.equal(date_ocean[:, 0], date_surface)
+
+
+def test_get_weights_date_continuity() -> None:
+    r"""Determines if the encoding is on the unit circle and continuous across the new year."""
+    dec_31, _ = get_weights_date("1999-12-31")
+    jan_01, _ = get_weights_date("2000-01-01")
+    jul_01, _ = get_weights_date("2000-07-01")
+    assert torch.allclose(dec_31[:, 0, 0].square().sum(), torch.tensor(1.0))
+    assert (dec_31[:, 0, 0] - jan_01[:, 0, 0]).norm() < 0.05
+    assert (jan_01[:, 0, 0] - jul_01[:, 0, 0]).norm() > 1.9
+
+
+def test_get_weights_date_dim2() -> None:
+    r"""Determines if dim=2 prepends a batch dimension to both encodings."""
+    date_surface, date_ocean = get_weights_date("2000-06-15", dim=2)
+    assert date_surface.shape == (1, 2, Y, X)
+    assert date_ocean.shape == (1, 2, Z, Y, X)
 
 
 @pytest.mark.integration
