@@ -1,10 +1,9 @@
-r"""Spatial masks and loss weights for the Black Sea dataset."""
+r"""Spatial masks, mesh and standardization statistics for the Black Sea dataset."""
 
 __all__ = [
     "get_weights_mask",
-    "get_weights_state_mask",
+    "get_weights_mesh",
     "get_weights_stats",
-    "get_weights_loss",
 ]
 
 import numpy as np
@@ -20,8 +19,8 @@ from neptune.config import (
 from neptune.data import (
     DATASET_REGION,
     DATASET_VARIABLES,
-    DATASET_VARIABLES_OCEAN_BIO,
     DATASET_VARIABLES_SURFACE,
+    Z,
 )
 
 
@@ -30,7 +29,16 @@ def _prepare(
     dim: int,
     device: torch.device | str | None,
 ) -> Tensor:
-    r"""Utility to prepare output tensors with the desired rank and device."""
+    r"""Optionally add a batch dimension to a tensor and move it to a device.
+
+    Arguments:
+        t      : Tensor to prepare.
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
+        device : Target device, or None to keep the current one.
+
+    Returns:
+        t : Prepared tensor.
+    """
     if dim not in {1, 2}:
         raise ValueError(f"ERROR - dim must be 1 or 2, got {dim!r}")
     if dim == 2:
@@ -40,11 +48,11 @@ def _prepare(
     return t
 
 
-def _mask_array() -> np.ndarray:
-    r"""Load the ocean mask array from the zarr store.
+def _mask_dataarray() -> xr.DataArray:
+    r"""Load the ocean mask given its coordinates from the zarr store.
 
     Returns:
-        mask : Binary numpy array of shape (Z, Y, X).
+        mask : Binary data array of shape (Z, Y, X).
     """
     ds = xr.open_zarr(PATH_MASK)
     try:
@@ -52,9 +60,22 @@ def _mask_array() -> np.ndarray:
             longitude=DATASET_REGION["x"],
             latitude=DATASET_REGION["y"],
             level=DATASET_REGION["z"],
-        ).values
+        ).load()
     finally:
         ds.close()
+
+
+def _encode_sin_cos(values: Tensor) -> Tensor:
+    r"""Rescale a coordinate to [0, π] over its range and encode it with sin/cos.
+
+    Arguments:
+        values : Coordinate values of any shape (*).
+
+    Returns:
+        encoding : Sine and cosine of the rescaled coordinate (2, *).
+    """
+    angle = torch.pi * (values - values.min()) / (values.max() - values.min())
+    return torch.stack([angle.sin(), angle.cos()])
 
 
 def _stats_arrays() -> tuple[list[float], list[float]]:
@@ -97,115 +118,82 @@ def get_weights_mask(
     *,
     dim: int = 1,
     device: torch.device | str | None = None,
-) -> Tensor:
-    r"""Load the Black Sea 3D ocean mask.
+) -> tuple[Tensor, Tensor]:
+    r"""Load the Black Sea land/sea masks for surface and ocean variables.
 
     Arguments:
-        dim    : Output rank. 1 → (Z, Y, X), 2 → (1, Z, Y, X).
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
         device : Target device ("cpu" or "cuda").
 
     Returns:
-        mask : Binary tensor with 1 on sea and 0 on land.
+        mask_surface : Binary mask (1, Y, X), with 1 on sea and 0 on land.
+        mask_ocean   : Binary mask (1, Z, Y, X), with 1 on sea and 0 on land.
     """
-    mask = _mask_array()
-    return _prepare(torch.as_tensor(mask, dtype=torch.float32), dim, device)
+    mask_ocean = torch.as_tensor(_mask_dataarray().values, dtype=torch.float32)[None]
+    mask_surface = mask_ocean[:, 0].clone()
+    return _prepare(mask_surface, dim, device), _prepare(mask_ocean, dim, device)
 
 
-def get_weights_state_mask(
+def get_weights_mesh(
     *,
     dim: int = 1,
     device: torch.device | str | None = None,
-) -> Tensor:
-    r"""Build the ocean mask aligned with the dataset channel layout.
+) -> tuple[Tensor, Tensor]:
+    r"""Build the sin/cos encoded mesh of the surface and ocean variables.
 
     Arguments:
-        dim    : Output rank. 1 → (C, Y, X), 2 → (1, C, Y, X).
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
         device : Target device ("cpu" or "cuda").
 
     Returns:
-        mask : Binary tensor with 1 on sea and 0 on land.
+        mesh_surface, mesh_ocean : (sin, cos) tensors of dimensions (4, Y, X) and (6, Z, Y, X).
     """
-    mask = get_weights_mask()
+    mask = _mask_dataarray()
+    depth, latitude, longitude = torch.meshgrid(
+        torch.tensor(mask.level.values, dtype=torch.float32).log(),
+        torch.tensor(mask.latitude.values, dtype=torch.float32),
+        torch.tensor(mask.longitude.values, dtype=torch.float32),
+        indexing="ij",
+    )
 
-    channels = []
-    for var in DATASET_VARIABLES:
-        if var in DATASET_VARIABLES_SURFACE:
-            channels.append(mask[0])
-        else:
-            channels.extend(mask.unbind(0))
-
-    return _prepare(torch.stack(channels, dim=0), dim, device)
+    mesh_ocean = torch.cat([
+        _encode_sin_cos(latitude),
+        _encode_sin_cos(longitude),
+        _encode_sin_cos(depth),
+    ])
+    mesh_surface = mesh_ocean[:4, 0].clone()
+    return _prepare(mesh_surface, dim, device), _prepare(mesh_ocean, dim, device)
 
 
 def get_weights_stats(
     *,
     dim: int = 1,
     device: torch.device | str | None = None,
-) -> tuple[Tensor, Tensor]:
-    r"""Load per-channel mean and standard deviation from the precomputed statistics.
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    r"""Load the standardization statistics of the surface and ocean variables.
 
     Arguments:
-        dim    : Output rank. 1 → (C, 1, 1), 2 → (1, C, 1, 1).
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
         device : Target device ("cpu" or "cuda").
 
     Returns:
-        mean : Per-channel mean.
-        std  : Per-channel standard deviation.
+        mean_surface : Mean of each surface variable (C_s, 1, 1).
+        std_surface  : Standard deviation of each surface variable (C_s, 1, 1).
+        mean_ocean   : Mean of each ocean variable, per level (C_o, Z, 1, 1).
+        std_ocean    : Standard deviation of each ocean variable, per level (C_o, Z, 1, 1).
     """
     means, stds = _stats_arrays()
+    mean = torch.tensor(means, dtype=torch.float32)
+    std = torch.tensor(stds, dtype=torch.float32)
 
-    mean = torch.tensor(means, dtype=torch.float32)[:, None, None]
-    std = torch.tensor(stds, dtype=torch.float32)[:, None, None]
-    return _prepare(mean, dim, device), _prepare(std, dim, device)
+    # Surface variables come first, followed by the Z levels of each ocean variable
+    n_surface = len(DATASET_VARIABLES_SURFACE)
+    mean_surface, mean_ocean = mean[:n_surface, None, None], mean[n_surface:].reshape(-1, Z, 1, 1)
+    std_surface, std_ocean = std[:n_surface, None, None], std[n_surface:].reshape(-1, Z, 1, 1)
 
-
-def get_weights_loss(
-    *,
-    dim: int = 1,
-    depths: tuple[int, int],
-    w_min: float = 0.1,
-    scaling: float = 100.0,
-    device: torch.device | str | None = None,
-) -> Tensor:
-    r"""Build per-channel, per-location loss weights with equal per-column contribution.
-
-    Arguments:
-        dim     : Output rank. 1 → (C, Y, X), 2 → (1, C, Y, X).
-        depths  : Level indices at which the linear decay begins for ocean variables.
-        w_min   : Minimum (unnormalised) weight at the deepest level of the decay zone.
-        scaling : Global multiplier applied to the final weight tensor.
-        device  : Target device ("cpu" or "cuda").
-
-    Returns:
-        weights : Per-channel, per-location weight tensor. Land pixels are zero.
-    """
-
-    dpt_phys, dpt_bio = depths
-
-    mask = get_weights_mask()
-    z_dim = mask.shape[0]
-    col_depth = mask.sum(dim=0)
-
-    def _column_weights(d_cutoff: int) -> Tensor:
-        r"""Normalised per-column vertical weights (sum_z = 1)."""
-        n_decay = (col_depth - 1 - d_cutoff).clamp(min=0).float()
-        z_idx = torch.arange(z_dim, dtype=torch.float32).view(z_dim, 1, 1)
-        z_above = (z_idx - d_cutoff).clamp(min=0)
-        t = torch.where(n_decay > 0, z_above / n_decay.unsqueeze(0), torch.zeros_like(z_above))
-        w_shape = (1.0 - (1.0 - w_min) * t.clamp(max=1.0)) * mask
-        col_sum = w_shape.sum(dim=0, keepdim=True).clamp(min=1e-8)
-        return w_shape / col_sum
-
-    w_ocean_phy = _column_weights(dpt_phys)
-    w_ocean_bio = _column_weights(dpt_bio)
-    w_surface = w_ocean_phy[0]
-
-    channels = []
-    for var in DATASET_VARIABLES:
-        if var in DATASET_VARIABLES_SURFACE:
-            channels.append(w_surface)
-        else:
-            w_ocean = w_ocean_bio if var in DATASET_VARIABLES_OCEAN_BIO else w_ocean_phy
-            channels.extend(w_ocean.unbind(0))
-
-    return _prepare(scaling * torch.stack(channels, dim=0), dim, device)
+    return (
+        _prepare(mean_surface, dim, device),
+        _prepare(std_surface, dim, device),
+        _prepare(mean_ocean, dim, device),
+        _prepare(std_ocean, dim, device),
+    )
