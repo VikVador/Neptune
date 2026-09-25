@@ -7,7 +7,7 @@ Cluster:
     "account"       : ["bsmfc"]
     "partition"     : ["gpu"]
     "time"          : ["48:00:00"]
-    "nodes"         : [4]
+    "nodes"         : [8]
     "cpus-per-node" : [32]
     "gpus-per-node" : [4]
     "ram-per-node"  : ["240GB"]
