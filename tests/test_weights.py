@@ -2,158 +2,147 @@ r"""Tests for neptune.data.weights."""
 
 import pytest
 import torch
+import xarray as xr
 
+from neptune.config import PATH_STATS_INCREMENTS
 from neptune.data import (
     DATASET_VARIABLES_OCEAN,
-    DATASET_VARIABLES_OCEAN_BIO,
-    DATASET_VARIABLES_OCEAN_PHY,
     DATASET_VARIABLES_SURFACE,
-    C,
     X,
     Y,
     Z,
 )
 from neptune.data.weights import (
-    _depth_dim,
-    _prepare,
+    _constant_levels,
+    _encode_sin_cos,
+    get_weights_bounds,
+    get_weights_date,
+    get_weights_increments,
     get_weights_loss,
     get_weights_mask,
-    get_weights_state_mask,
+    get_weights_mesh,
     get_weights_stats,
 )
 
-_DEPTHS = (Z - 1, 20)
-_W_MIN = 0.1
+C_S = len(DATASET_VARIABLES_SURFACE)
+C_O = len(DATASET_VARIABLES_OCEAN)
+
+
+def test_encode_sin_cos_typical() -> None:
+    r"""Determines if a coordinate range is mapped to [0, π], on the unit circle."""
+
+    sin, cos = _encode_sin_cos(torch.tensor([10.0, 15.0, 20.0]))
+
+    assert torch.allclose(sin, torch.tensor([0.0, 1.0, 0.0]), atol=1e-6)
+    assert torch.allclose(cos, torch.tensor([1.0, 0.0, -1.0]), atol=1e-6)
+    assert _encode_sin_cos(torch.rand(3, 4, 5)).shape == (2, 3, 4, 5)
+
+
+def test_get_weights_date_typical() -> None:
+    r"""Determines if the date encoding covers both grids and is continuous across the new year."""
+
+    date_surface, date_ocean = get_weights_date("1999-12-31", dim=2)
+    jan_01, _ = get_weights_date("2000-01-01")
+    jul_01, _ = get_weights_date("2000-07-01")
+
+    assert date_surface.shape == (1, 2, Y, X)
+    assert date_ocean.shape == (1, 2, Z, Y, X)
+    assert (date_surface[0, :, 0, 0] - jan_01[:, 0, 0]).norm() < 0.05
+    assert (jan_01[:, 0, 0] - jul_01[:, 0, 0]).norm() > 1.9
 
 
 @pytest.mark.integration
-def test_get_weights_mask_shape() -> None:
-    r"""Determines if the mask has the expected depth and spatial dimensions."""
-    assert get_weights_mask().shape == (Z, Y, X)
+def test_get_weights_mask_typical() -> None:
+    r"""Determines if the masks are binary, with the surface mask being the top ocean level."""
+
+    mask_surface, mask_ocean = get_weights_mask()
+
+    assert mask_surface.shape == (1, Y, X)
+    assert mask_ocean.shape == (1, Z, Y, X)
+    assert set(mask_ocean.unique().tolist()) == {0.0, 1.0}
+    assert torch.equal(mask_surface, mask_ocean[:, 0])
 
 
 @pytest.mark.integration
-def test_get_weights_mask_dtype() -> None:
-    r"""Determines if the mask is a float32 tensor."""
-    assert get_weights_mask().dtype == torch.float32
+def test_get_weights_mesh_typical() -> None:
+    r"""Determines if latitude varies along Y only, longitude along X only and depth along Z only."""
+
+    mesh_surface, mesh_ocean = get_weights_mesh()
+    latitude, longitude, depth = mesh_ocean[0], mesh_ocean[2], mesh_ocean[4]
+
+    assert mesh_surface.shape == (4, Y, X)
+    assert mesh_ocean.shape == (6, Z, Y, X)
+    assert torch.equal(mesh_surface, mesh_ocean[:4, 0])
+    assert torch.equal(latitude, latitude[:1, :, :1].expand(Z, Y, X))
+    assert torch.equal(longitude, longitude[:1, :1, :].expand(Z, Y, X))
+    assert torch.equal(depth, depth[:, :1, :1].expand(Z, Y, X))
 
 
 @pytest.mark.integration
-def test_get_weights_mask_binary() -> None:
-    r"""Determines if the mask contains only 0 (land) and 1 (sea)."""
-    assert set(get_weights_mask().unique().tolist()) <= {0.0, 1.0}
+def test_get_weights_stats_typical() -> None:
+    r"""Determines if the statistics broadcast over the surface and ocean states, with positive stds."""
+
+    mean_surface, std_surface, mean_ocean, std_ocean = get_weights_stats()
+
+    assert mean_surface.shape == std_surface.shape == (C_S, 1, 1)
+    assert mean_ocean.shape == std_ocean.shape == (C_O, Z, 1, 1)
+    assert (std_surface > 0).all() and (std_ocean > 0).all()
 
 
 @pytest.mark.integration
-def test_get_weights_mask_dim2() -> None:
-    r"""Determines if dim=2 prepends a batch dimension."""
-    assert get_weights_mask(dim=2).shape == (1, Z, Y, X)
+def test_get_weights_increments_typical() -> None:
+    r"""Determines if the increments statistics are the physical ones divided by the states std."""
+
+    _, std_surface, _, std_ocean = get_weights_stats()
+    _, std_inc_surface, _, std_inc_ocean = get_weights_increments()
+    physical = xr.open_zarr(PATH_STATS_INCREMENTS)
+
+    i_windsp = DATASET_VARIABLES_SURFACE.index("windsp")
+    i_votemper = DATASET_VARIABLES_OCEAN.index("votemper")
+    windsp = torch.tensor(float(physical["windsp"].sel(statistic="std")))
+    votemper = torch.tensor(physical["votemper"].sel(statistic="std").values, dtype=torch.float32)
+
+    assert std_inc_ocean.shape == (C_O, Z, 1, 1)
+    assert torch.isclose(std_inc_surface[i_windsp] * std_surface[i_windsp], windsp)
+    assert torch.allclose(
+        std_inc_ocean[i_votemper] * std_ocean[i_votemper], votemper[:, None, None]
+    )
 
 
 @pytest.mark.integration
-def test_get_weights_state_mask_shape() -> None:
-    r"""Determines if the state mask has the expected channel count."""
-    assert get_weights_state_mask().shape == (C, Y, X)
+def test_get_weights_bounds_typical() -> None:
+    r"""Determines if the bounds map 0 to the positive variables and pin constant levels to 0."""
+
+    mean_surface, std_surface, _, _ = get_weights_stats()
+    lower_surface, upper_surface, lower_ocean, upper_ocean = get_weights_bounds()
+    _, constant_ocean = _constant_levels()
+
+    i_windsp = DATASET_VARIABLES_SURFACE.index("windsp")
+    windsp = lower_surface[i_windsp] * std_surface[i_windsp] + mean_surface[i_windsp]
+
+    assert torch.allclose(windsp, torch.zeros(1, 1), atol=1e-5)
+    assert (upper_surface == float("inf")).all()
+    assert constant_ocean[DATASET_VARIABLES_OCEAN.index("DOX")].any()
+    assert (lower_ocean[constant_ocean] == 0).all() and (upper_ocean[constant_ocean] == 0).all()
 
 
 @pytest.mark.integration
-def test_get_weights_state_mask_binary() -> None:
-    r"""Determines if the state mask contains only 0 (land) and 1 (sea)."""
-    assert set(get_weights_state_mask().unique().tolist()) <= {0.0, 1.0}
+def test_get_weights_loss_typical() -> None:
+    r"""Determines if the loss averages the CRPS of normalized increments over non-constant levels."""
 
+    _, constant_ocean = _constant_levels()
+    _, std_inc_surface, _, std_inc_ocean = get_weights_increments()
+    weights_surface, weights_ocean = get_weights_loss()
 
-@pytest.mark.integration
-def test_get_weights_state_mask_dim2() -> None:
-    r"""Determines if dim=2 prepends a batch dimension."""
-    assert get_weights_state_mask(dim=2).shape == (1, C, Y, X)
+    assert weights_surface.shape == (C_S,)
+    assert weights_ocean.shape == (C_O, Z)
+    assert (weights_ocean[constant_ocean[..., 0, 0]] == 0).all()
 
+    # Weights times the increments std are all equal to 1 / (number of non-constant levels)
+    scaled = torch.cat([
+        weights_surface * std_inc_surface[:, 0, 0],
+        (weights_ocean * std_inc_ocean[..., 0, 0]).flatten(),
+    ])
+    scaled = scaled[scaled > 0]
 
-@pytest.mark.integration
-def test_get_weights_loss_shape() -> None:
-    r"""Determines if loss weights have the expected channel and spatial layout."""
-    assert get_weights_loss(depths=_DEPTHS, w_min=_W_MIN).shape == (C, Y, X)
-
-
-@pytest.mark.integration
-def test_get_weights_loss_dim2() -> None:
-    r"""Determines if dim=2 prepends a batch dimension."""
-    assert get_weights_loss(dim=2, depths=_DEPTHS, w_min=_W_MIN).shape == (1, C, Y, X)
-
-
-@pytest.mark.integration
-def test_get_weights_loss_land_is_zero() -> None:
-    r"""Determines if all land pixels have zero weight."""
-    weights = get_weights_loss(depths=_DEPTHS, w_min=_W_MIN)
-    sea_mask = get_weights_state_mask().bool()
-    assert (weights[~sea_mask] == 0.0).all()
-
-
-@pytest.mark.integration
-def test_get_weights_loss_column_sum() -> None:
-    r"""Determines if weights sum to 1 along Z for every sea column, for a physical ocean variable."""
-    n_surf = len(DATASET_VARIABLES_SURFACE)
-    c0 = n_surf + DATASET_VARIABLES_OCEAN.index(DATASET_VARIABLES_OCEAN_PHY[0]) * Z
-
-    weights = get_weights_loss(depths=_DEPTHS, w_min=_W_MIN)
-    col_sum = weights[c0 : c0 + Z].sum(dim=0)  # (Y, X)
-    sea = get_weights_mask().sum(dim=0) > 0  # (Y, X)
-    assert torch.allclose(col_sum[sea], torch.ones_like(col_sum[sea]), atol=1e-5)
-
-
-@pytest.mark.integration
-def test_get_weights_loss_bio_lt_phy_deep() -> None:
-    r"""Determines if bio channels are down-weighted vs physical channels at levels past dpt_bio."""
-    n_surf = len(DATASET_VARIABLES_SURFACE)
-    deep_z = 40  # level 40 > dpt_bio=20
-    phy_idx = n_surf + DATASET_VARIABLES_OCEAN.index(DATASET_VARIABLES_OCEAN_PHY[0]) * Z + deep_z
-    bio_idx = n_surf + DATASET_VARIABLES_OCEAN.index(DATASET_VARIABLES_OCEAN_BIO[0]) * Z + deep_z
-
-    weights = get_weights_loss(depths=_DEPTHS, w_min=_W_MIN)
-    sea = get_weights_mask()[deep_z] > 0
-    assert (weights[bio_idx][sea] < weights[phy_idx][sea]).all()
-
-
-@pytest.mark.integration
-def test_get_weights_stats_shape() -> None:
-    r"""Determines if mean and std have the expected channel layout."""
-    mean, std = get_weights_stats()
-    assert mean.shape == (C, 1, 1)
-    assert std.shape == (C, 1, 1)
-
-
-@pytest.mark.integration
-def test_get_weights_stats_positive_std() -> None:
-    r"""Determines if all standard deviations are strictly positive."""
-    _, std = get_weights_stats()
-    assert (std > 0).all()
-
-
-@pytest.mark.integration
-def test_get_weights_stats_roundtrip() -> None:
-    r"""Determines if standardization followed by unstandardization is the identity."""
-    mean, std = get_weights_stats()
-    x = torch.randn(C, Y, X)
-    assert torch.allclose((x - mean) / std * std + mean, x, rtol=1e-3, atol=1e-3)
-
-
-@pytest.mark.integration
-def test_get_weights_stats_dim2() -> None:
-    r"""Determines if dim=2 prepends a batch dimension to both tensors."""
-    mean, std = get_weights_stats(dim=2)
-    assert mean.shape == (1, C, 1, 1)
-    assert std.shape == (1, C, 1, 1)
-
-
-def test_prepare_rank() -> None:
-    r"""Determines if _prepare correctly unsqueezes for dim=2."""
-    t = torch.zeros(3, 8, 8)
-    assert _prepare(t, dim=1, device=None).shape == (3, 8, 8)
-    assert _prepare(t, dim=2, device=None).shape == (1, 3, 8, 8)
-
-
-def test_depth_dim() -> None:
-    r"""Determines if _depth_dim returns the correct dimension name per variable."""
-    assert _depth_dim("uo") == "depthu"
-    assert _depth_dim("vo") == "depthv"
-    assert _depth_dim("votemper") == "deptht"
-    assert _depth_dim("vosaline") == "deptht"
+    assert torch.allclose(scaled, torch.full_like(scaled, 1 / len(scaled)))

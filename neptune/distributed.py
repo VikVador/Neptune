@@ -14,9 +14,19 @@ def reduce_mean(
     value: float,
     device: torch.device,
 ) -> float:
-    r"""Reduce a scalar value across distributed processes by averaging."""
+    r"""Reduce a scalar value across distributed processes by averaging.
+
+    Arguments:
+        value  : Scalar value local to the current process.
+        device : Device on which the all-reduce is performed.
+
+    Returns:
+        value : Value averaged over every process.
+    """
+
     t = torch.tensor(value, device=device)
     dist.all_reduce(t, op=dist.ReduceOp.AVG)
+
     return t.item()
 
 
@@ -30,6 +40,7 @@ def setup_distributed() -> tuple[int, int, int, torch.device, bool]:
         device         : Torch device assigned to this process.
         is_distributed : True when running under torchrun, False otherwise.
     """
+
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         # Running under torchrun
         if "LOCAL_RANK" not in os.environ:

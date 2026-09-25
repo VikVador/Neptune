@@ -1,0 +1,66 @@
+WandB:
+    "entity"  : ["neptuneAI"]
+    "project" : ["neptune-training-forecast"]
+    "mode"    : ["online"]
+
+Cluster:
+    "account"       : ["bsmfc"]
+    "partition"     : ["gpu"]
+    "time"          : ["48:00:00"]
+    "nodes"         : [4]
+    "cpus-per-node" : [32]
+    "gpus-per-node" : [4]
+    "ram-per-node"  : ["240GB"]
+
+State:
+    "saving"          : [true]
+    "checkpoint_name" : [null]
+
+Training:
+    "members"             : [2]
+    "batch_size_per_step" : [128]
+    "batch_size_per_gpu"  : [1]
+    "steps_update"        : [50000]
+    "steps_logging"       : [4]
+    "steps_validation"    : [1024]
+    "batches_validation"  : [128]
+    "num_workers"         : [4]
+    "prefetch_factor"     : [1]
+    "learning_rate_start" : [0.00001]
+    "learning_rate_peak"  : [0.00070]
+    "learning_rate_end"   : [0.00001]
+    "warmup_steps"        : [512]
+
+Model:
+    "input_states" : [2]
+    "lat_channels" : [512]
+    "mod_features" : [32]
+
+    "config_surface":
+        "hid_channels"  : [[16, 32, 64, 128, 128]]
+        "hid_blocks"    : [[3, 3, 3, 3, 3]]
+        "hid_groups"    : [[1, 1, 0, 0, 0]]
+        "kernel_size"   : [3]
+        "stride"        : [2]
+        "ffn_factor"    : [1]
+        "dropout"       : [0.02]
+        "checkpointing" : [true]
+
+    "config_ocean":
+        "hid_channels"  : [[32, 64, 128, 256, 256]]
+        "hid_blocks"    : [[3, 3, 3, 3, 3]]
+        "hid_groups"    : [[1, 1, 0, 0, 0]]
+        "kernel_size"   : [3]
+        "stride"        : [2]
+        "ffn_factor"    : [1]
+        "dropout"       : [0.02]
+        "checkpointing" : [true]
+
+    "config_processor":
+        "hid_channels"    : [1024]
+        "hid_blocks"      : [16]
+        "attention_heads" : [8]
+        "ffn_factor"      : [2]
+        "ffn_activation"  : ["silu"]
+        "dropout"         : [0.02]
+        "checkpointing"   : [true]

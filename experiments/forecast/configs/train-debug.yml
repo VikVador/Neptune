@@ -1,0 +1,55 @@
+WandB:
+    "entity"  : ["neptuneAI"]
+    "project" : ["neptune-training-debug"]
+    "mode"    : ["disabled"]
+
+Cluster:
+    "account"       : ["bsmfc"]
+    "partition"     : ["debug-gpu"]
+    "time"          : ["00:30:00"]
+    "nodes"         : [1]
+    "cpus-per-node" : [8]
+    "gpus-per-node" : [1]
+    "ram-per-node"  : ["60GB"]
+
+State:
+    "saving"          : [false]
+    "checkpoint_name" : [null]
+
+Training:
+    "members"             : [2]
+    "batch_size_per_step" : [2]
+    "batch_size_per_gpu"  : [1]
+    "steps_update"        : [8]
+    "steps_logging"       : [2]
+    "steps_validation"    : [4]
+    "batches_validation"  : [1]
+    "num_workers"         : [1]
+    "prefetch_factor"     : [1]
+    "learning_rate_start" : [0.0001]
+    "learning_rate_peak"  : [0.0005]
+    "learning_rate_end"   : [0.0001]
+    "warmup_steps"        : [2]
+
+Model:
+    "input_states" : [2]
+    "lat_channels" : [16]
+    "mod_features" : [32]
+
+    "config_surface":
+        "hid_channels"  : [[4, 8, 16, 32, 32]]
+        "hid_blocks"    : [[1, 1, 1, 1, 1]]
+        "stride"        : [2]
+        "checkpointing" : [true]
+
+    "config_ocean":
+        "hid_channels"  : [[4, 8, 16, 32, 32]]
+        "hid_blocks"    : [[1, 1, 1, 1, 1]]
+        "stride"        : [2]
+        "checkpointing" : [true]
+
+    "config_processor":
+        "hid_channels"    : [64]
+        "hid_blocks"      : [2]
+        "attention_heads" : [4]
+        "checkpointing"   : [true]

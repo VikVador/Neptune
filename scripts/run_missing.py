@@ -1,17 +1,16 @@
 r"""Script to fix missing/empty NetCDF samples by copying adjacent day data."""
 
 import argparse
-import dawgz
 import numpy as np
 import os
 import re
 import xarray as xr
-import yaml
 
 from datetime import datetime, timedelta
-from pathlib import Path
+from dawgz import job, schedule
 
 from neptune.config import SIMULATION_DATA
+from neptune.tools import load_configuration
 
 
 # fmt: off
@@ -20,8 +19,9 @@ def build_file_list() -> list[str]:
     r"""Return the list of all missing/empty NetCDF files to fix.
 
     Returns:
-        files: flat list of file paths with known issues.
+        files : Paths of every file with a known issue.
     """
+
     return [
         f
         for datatype in ["ptrc_T"]
@@ -55,15 +55,17 @@ def parse_date(file_path: str) -> datetime:
     r"""Extract the date from a NetCDF filename.
 
     Arguments:
-        file_path: path to the NetCDF file.
+        file_path : Path to the NetCDF file.
 
     Returns:
-        date: parsed date from the filename.
+        date : Date parsed from the filename.
     """
+
     fname = os.path.basename(file_path)
     match = re.match(r"BS_1d_(\d{8})_", fname)
     if match is None:
-        raise ValueError(f"Cannot parse date from filename: {fname}")
+        raise ValueError(f"ERROR - Cannot parse date from filename: {fname}")
+
     return datetime.strptime(match.group(1), "%Y%m%d")
 
 
@@ -71,16 +73,17 @@ def adjacent_path(file_path: str, offset: int) -> str:
     r"""Return the path of the file for the day adjacent to the given file.
 
     Arguments:
-        file_path: path to the missing/empty NetCDF file.
-        offset   : day offset, either -1 (previous day) or +1 (next day).
+        file_path : Path to the missing/empty NetCDF file.
+        offset    : Day offset, either -1 (previous day) or +1 (next day).
 
     Returns:
-        path: path to the adjacent day's file.
+        path : Path to the adjacent day's file.
     """
+
     fname = os.path.basename(file_path)
     match = re.match(r"BS_1d_(\d{8})_\d{8}_(.+)_\d{8}-\d{8}\.(nc4?)", fname)
     if match is None:
-        raise ValueError(f"Unexpected filename format: {fname}")
+        raise ValueError(f"ERROR - Unexpected filename format: {fname}")
 
     date_str, datatype, _ = match.groups()
     adj_date = datetime.strptime(date_str, "%Y%m%d") + timedelta(days=offset)
@@ -92,15 +95,16 @@ def adjacent_path(file_path: str, offset: int) -> str:
         if os.path.exists(path):
             return path
 
-    raise FileNotFoundError(f"No adjacent file found for {fname} with offset={offset:+d}")
+    raise FileNotFoundError(f"ERROR - No adjacent file found for {fname} with offset={offset:+d}")
 
 
 def fix_missing_sample(file_path: str) -> None:
     r"""Fix a missing NetCDF sample by copying data from an adjacent day.
 
     Arguments:
-        file_path: path to the missing/empty NetCDF file to fix.
+        file_path : Path to the missing/empty NetCDF file to fix.
     """
+
     try:
         src_path = adjacent_path(file_path, -1)
     except FileNotFoundError:
@@ -141,24 +145,30 @@ if __name__ == "__main__":
         "-c",
         type=str,
         required=True,
-        help="Path to YAML config file (relative to scripts/).",
+        help="Path to the missing samples .yml configuration file.",
     )
+
     parser.add_argument(
         "--backend",
         "-b",
         type=str,
         default="slurm",
         choices=["slurm", "async"],
-        help="Computation backend, 'slurm' for cluster and 'async' for local execution.",
+        help="Computation backend, 'slurm' for cluster-based scheduling and 'async' for local execution.",
     )
 
-    args = parser.parse_args()
-    cfg = yaml.safe_load((Path(__file__).parent / args.config).read_text())
-    job_config = cfg["fix_missing_sample"]
-    files = build_file_list()
+    args           = parser.parse_args()
+    config_cluster = load_configuration(args.config)[0]["Cluster"]
+    files          = build_file_list()
 
-    @dawgz.job(array=len(files), **job_config)
+    @job(array=len(files), **config_cluster)
     def fix(i: int) -> None:
+        r"""Fix the i-th missing NetCDF sample."""
         fix_missing_sample(files[i])
 
-    dawgz.schedule(fix, name="NEPTUNE-FIX", backend=args.backend, export="ALL")
+    schedule(
+        fix,
+        name="NEPT-MISSING",
+        backend=args.backend,
+        export="ALL",
+    )

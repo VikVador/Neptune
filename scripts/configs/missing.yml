@@ -1,10 +1,6 @@
-# ======================================
-#             N E P T U N E
-# ======================================
-
-fix_missing_sample:
-  cpus      : 1
-  mem       : "5GB"
-  time      : "00:02:30"
-  account   : "bsmfc"
-  partition : "batch"
+Cluster:
+    "cpus"      : [1]
+    "ram"       : ["5GB"]
+    "time"      : ["00:02:30"]
+    "account"   : ["bsmfc"]
+    "partition" : ["batch"]

@@ -8,15 +8,10 @@ __all__ = [
     "DATASET_REGION",
     "DATASET_VARIABLES_SURFACE",
     "DATASET_VARIABLES_OCEAN",
-    "DATASET_VARIABLES_OCEAN_PHY",
-    "DATASET_VARIABLES_OCEAN_BIO",
     "DATASET_VARIABLES",
     "Z",
-    "C",
     "X",
     "Y",
-    "C_IN",
-    "C_OUT",
 ]
 
 # fmt: off
@@ -28,6 +23,7 @@ VARIABLES_CLIPPING = {
     "vosaline": (0, None),
     "CHL":      (0, None),
     "DOX":      (0, None),
+    "PAR":      (0, None),
     "PHO":      (0, None),
     "SIO":      (0, None),
     "NOS":      (0, None),
@@ -65,16 +61,10 @@ DATASET_VARIABLES_OCEAN = [
     "NOS",
 ]
 
-DATASET_VARIABLES_OCEAN_PHY = DATASET_VARIABLES_OCEAN[:4]
-DATASET_VARIABLES_OCEAN_BIO = DATASET_VARIABLES_OCEAN[4:]
-DATASET_VARIABLES           = DATASET_VARIABLES_SURFACE + DATASET_VARIABLES_OCEAN
+DATASET_VARIABLES = DATASET_VARIABLES_SURFACE + DATASET_VARIABLES_OCEAN
 
 # ----- Dimensions
 #
-X     = DATASET_REGION["x"].stop - DATASET_REGION["x"].start               # Longitudes
-Y     = DATASET_REGION["y"].stop - DATASET_REGION["y"].start               # Latitudes
-Z     = DATASET_REGION["z"].stop - DATASET_REGION["z"].start               # Depth levels
-
-C     = len(DATASET_VARIABLES_SURFACE) + len(DATASET_VARIABLES_OCEAN) * Z  # Aggregated levels
-C_IN  = C + Z                                                              # State variables + Mask
-C_OUT = C                                                                  # State variables
+X = DATASET_REGION["x"].stop - DATASET_REGION["x"].start  # Longitudes
+Y = DATASET_REGION["y"].stop - DATASET_REGION["y"].start  # Latitudes
+Z = DATASET_REGION["z"].stop - DATASET_REGION["z"].start  # Depth levels

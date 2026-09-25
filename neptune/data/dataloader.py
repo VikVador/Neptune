@@ -4,7 +4,7 @@ __all__ = [
     "get_dataloaders",
 ]
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from typing import Any
@@ -16,14 +16,18 @@ def infinite_dataloader(
     dataloader: DataLoader,
     batches: int,
     is_distributed: bool = False,
-) -> Any:
-    r"""Makes a basic PyTorch dataloader 'infinite'.
+) -> Iterator:
+    r"""Make a basic PyTorch dataloader 'infinite' by cycling over it.
 
     Arguments:
-        dataloader     : A PyTorch dataloader to iterate over.
+        dataloader     : Dataloader to iterate over.
         batches        : Maximum number of batches to yield before stopping.
-        is_distributed : Whether running in distributed mode (updates sampler epoch for proper shuffling).
+        is_distributed : Whether running in distributed mode (updates the sampler epoch each cycle).
+
+    Returns:
+        batch : Successive batches, cycling past the end of the dataloader as many times as needed.
     """
+
     epoch = 0
     batches_remaining = batches
 
@@ -44,7 +48,6 @@ def get_dataloaders(
     batch_size: int,
     num_workers: int,
     prefetch_factor: int,
-    get_datasets_fn: Callable | None = None,
     shuffle: tuple[bool, bool, bool] = (True, False, False),
     infinite: Sequence[bool] | None = None,
     batches: Sequence[int] | None = None,
@@ -59,36 +62,32 @@ def get_dataloaders(
         batch_size      : Number of samples per batch (per GPU in distributed mode).
         num_workers     : Number of worker processes for data loading.
         prefetch_factor : Number of batches prefetched per worker.
-        get_datasets_fn : Function returning (train, val, test) datasets.
         shuffle         : Whether to shuffle each split (train, val, test).
         infinite        : Whether to cycle each dataloader indefinitely.
         batches         : Maximum number of batches to yield before stopping.
         rank            : Global rank of the current process (distributed mode).
         world_size      : Total number of processes (distributed mode).
         is_distributed  : Whether to use DistributedSampler for each dataloader.
-        kwargs          : Forwarded to get_datasets_fn().
+        kwargs          : Forwarded to get_datasets().
 
     Returns:
         train_loader : Training dataloader, or an infinite iterator.
         val_loader   : Validation dataloader, or an infinite iterator.
         test_loader  : Test dataloader, or an infinite iterator.
     """
-    if get_datasets_fn is None:
-        get_datasets_fn = get_datasets
+
     if infinite is None:
         infinite = [False, False, False]
     if batches is None:
         batches = [None, None, None]
 
-    if len(infinite) != 3:
-        raise ValueError(f"ERROR - infinite must have exactly 3 elements, got {len(infinite)}.")
-    if len(batches) != 3:
-        raise ValueError(f"ERROR - batches must have exactly 3 elements, got {len(batches)}.")
-
+    # Security
+    assert len(infinite) == 3, f"ERROR - infinite must have 3 elements, got {len(infinite)}."
+    assert len(batches) == 3, f"ERROR - batches must have 3 elements, got {len(batches)}."
     for inf, bst in zip(infinite, batches, strict=True):
         assert not (inf and bst is None), "ERROR - batches[i] must be set when infinite[i]=True."
 
-    datasets = get_datasets_fn(**kwargs)
+    datasets = get_datasets(**kwargs)
 
     dataloaders = []
     for i, dataset in enumerate(datasets):
@@ -114,6 +113,7 @@ def get_dataloaders(
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
             pin_memory=True,
             persistent_workers=num_workers > 0,
+            drop_last=True,
         )
         dataloaders.append(dataloader)
 
