@@ -230,12 +230,13 @@ def training(
     # Model | Masks, meshes and statistics are identical on every process, no need to broadcast them
     if is_distributed:
         ddp_kwargs = {"device_ids": [local_rank], "output_device": local_rank} if device.type == "cuda" else {}
-        model      = DDP(model, broadcast_buffers=False, **ddp_kwargs)
+        model      = DDP(model, broadcast_buffers=False, gradient_as_bucket_view=True, **ddp_kwargs)
 
     # Setting up training tools
     optimizer = SOAP(
         model.parameters(),
         lr=lr_peak,
+        max_precond_size=1024,
     )
 
     scheduler = warmup_cosine_decay(
