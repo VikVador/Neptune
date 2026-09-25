@@ -1,25 +1,21 @@
 [project]
 name = "neptune"
 version = "1.0.0"
-description = "A latent generative emulator of the Black Sea Forecast Operational Model."
+description = "A generative emulator of the Black Sea Forecast Operational Model."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 
 dependencies = [
   "albus @ git+https://github.com/VikVador/albus.git",
-  "azula==0.11.1",
-  "bottleneck==1.6.0",
+  "azula @ git+https://github.com/probabilists/azula@dev",
+  "cloudpickle==3.1.2",
   "dask==2024.6.2",
   "dawgz==1.0.4",
-  "einops==0.8.0",
-  "google-crc32c==1.8.0",
-  "h5py==3.12.1",
   "netCDF4==1.7.0",
   "numpy==1.26.3",
   "omegaconf==2.3.0",
   "pyyaml==6.0.2",
-  "scipy==1.16.0",
   "shaggy @ git+https://github.com/VikVador/shaggy.git",
   "torch==2.5.1",
   "tqdm==4.66.4",
@@ -30,8 +26,6 @@ dependencies = [
 
 [project.optional-dependencies]
 all = [
-  "cartopy==0.24.1",
-  "cmocean==4.0.3",
   "ipykernel==6.29.5",
   "jupyterlab==4.2.2",
   "matplotlib==3.9.0",

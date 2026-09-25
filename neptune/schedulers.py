@@ -28,20 +28,19 @@ def warmup_cosine_decay(
         total_steps  : Total number of optimizer steps (warmup + decay combined).
 
     Returns:
-        scheduler : LambdaLR scheduler, to be stepped once per optimizer step.
+        A learning rate scheduler.
     """
 
-    if lr_peak <= 0:
-        raise ValueError(f"lr_peak must be > 0, got {lr_peak}")
-    if total_steps <= 0:
-        raise ValueError(f"total_steps must be > 0, got {total_steps}")
-    if not (0 <= warmup_steps <= total_steps):
-        raise ValueError(
-            f"warmup_steps must be in [0, total_steps], got {warmup_steps} > {total_steps}"
-        )
+    # Security
+    assert lr_peak > 0, f"ERROR - lr_peak must be > 0, got {lr_peak}."
+    assert total_steps > 0, f"ERROR - total_steps must be > 0, got {total_steps}."
+    assert 0 <= warmup_steps <= total_steps, (
+        f"ERROR - warmup_steps must be in [0, {total_steps}], got {warmup_steps}."
+    )
 
     def _lr_lambda(step: int) -> float:
         r"""Compute the learning rate multiplier for a given optimizer step."""
+
         # Linear warmup: interpolate from lr_start to lr_peak
         if step < warmup_steps:
             alpha = step / warmup_steps
@@ -50,6 +49,7 @@ def warmup_cosine_decay(
         # Cosine decay: smoothly anneal from lr_peak down to lr_end
         progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
         cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+
         return lr_end / lr_peak + (1.0 - lr_end / lr_peak) * cosine_decay
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, _lr_lambda)

@@ -22,16 +22,10 @@ wandb/
 .dawgz/
 scripts/wandb/
 scripts/.dawgz/
-experiments/encoder/wandb/
-experiments/encoder/.dawgz/
-experiments/encoder/**/*.png
-experiments/encoder/**/*.pdf
-experiments/diffusion/wandb/
-experiments/diffusion/.dawgz/
-experiments/diffusion/**/*.png
-experiments/diffusion/**/*.pdf
-experiments/diagnostics/wandb/
-experiments/diagnostics/.dawgz/
+experiments/forecast/wandb/
+experiments/forecast/.dawgz/
+experiments/forecast/**/*.png
+experiments/forecast/**/*.pdf
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
