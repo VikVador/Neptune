@@ -1,17 +1,14 @@
-# ======================================
-#             N E P T U N E
-# ======================================
+Compute:
+    "jobs"      : [16]
+    "cpus"      : [16]
+    "ram"       : ["492GB"]
+    "time"      : ["06:00:00"]
+    "account"   : ["bsmfc"]
+    "partition" : ["large"]
 
-compute_stats:
-  cpus      : 1
-  mem       : "8GB"
-  time      : "02:00:00"
-  account   : "bsmfc"
-  partition : "batch"
-
-aggregate_stats:
-  cpus      : 1
-  mem       : "4GB"
-  time      : "00:30:00"
-  account   : "bsmfc"
-  partition : "batch"
+Aggregate:
+    "cpus"      : [1]
+    "ram"       : ["492GB"]
+    "time"      : ["00:30:00"]
+    "account"   : ["bsmfc"]
+    "partition" : ["large"]
