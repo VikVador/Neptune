@@ -26,6 +26,7 @@ def assert_date_format(date_string: str) -> None:
     Arguments:
         date_string : Date to validate, expected format 'YYYY-MM-DD'.
     """
+
     pattern = r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$"
     if not re.match(pattern, date_string):
         raise ValueError("ERROR - The format is incorrect, it should be YYYY-MM-DD.")

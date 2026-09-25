@@ -1,87 +1,132 @@
-r"""Launch the training of a single (surface or ocean) encoder."""
+r"""Launch the training of a Functional Generative Network (FGN) forecasting the next day."""
 
 import argparse
 import cloudpickle
 import dask
-import dawgz
-import secrets
+import math
 import torch
 import torch.distributed as dist
 import wandb
 
+from collections.abc import Sequence
+from dawgz import job, schedule
 from omegaconf import OmegaConf
-from shaggy.loss import loss_geometry_embedding
-from shaggy.models.cae import ConvEncoder
 from shaggy.optimizers.gradients import safe_gradient_step
 from shaggy.optimizers.soap import SOAP
-from shaggy.tools import load as s_load
-from shaggy.tools import load_config
-from shaggy.tools import save as s_save
-from torch.amp.grad_scaler import GradScaler
+from shaggy.tools import load, load_config, save
+from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from neptune.config import PATH_MODELS
-from neptune.data import DATASET_VARIABLES_OCEAN, DATASET_VARIABLES_SURFACE
 from neptune.data.dataloader import get_dataloaders
-from neptune.data.weights import get_weights_mask
+from neptune.data.weights import get_weights_date, get_weights_loss
 from neptune.distributed import reduce_mean, setup_distributed
+from neptune.loss import loss_crps
+from neptune.model import FGN
 from neptune.schedulers import warmup_cosine_decay
-from neptune.tools import generate_run_name_ae, get_wandb_hyperparameters, load_configuration
+from neptune.tools import generate_run_name_fgn, get_wandb_hyperparameters, load_configuration
 
 
 # fmt: off
 #
-def _build_encoder(
-    in_channels     : int,
-    spatial         : int,
-    arch            : dict,
+def _build_model(
+    config_model    : dict,
     checkpoint_name : str | None,
     device          : torch.device,
-) -> tuple[torch.nn.Module, dict]:
-    r"""Build a ConvEncoder from scratch, or resume one from a checkpoint.
+) -> tuple[FGN, dict]:
+    r"""Build a FGN from scratch, or resume one from a checkpoint.
 
     Arguments:
-        in_channels     : Number of input channels (including the mask channel), if training from scratch.
-        spatial         : Number of spatial dimensions (2 for surface, 3 for ocean).
-        arch            : Architecture config (hid_channels, hid_blocks, lat_channels, checkpointing, ...).
-        checkpoint_name : Name of the checkpoint to resume from, or None to start fresh.
+        config_model    : Constructor kwargs of the FGN, used when training from scratch.
+        checkpoint_name : Name of the checkpoint to resume from (if applicable).
         device          : Target device.
 
     Returns:
-        encoder : The (possibly resumed) ConvEncoder, in train mode.
-        config  : The ConvEncoder constructor kwargs, reused as-is when saving a checkpoint.
+        model  : FGN in training mode, on the target device.
+        config : Constructor kwargs.
     """
+
     if checkpoint_name is not None:
         ckpt_path = PATH_MODELS / checkpoint_name
         config    = OmegaConf.to_container(load_config(ckpt_path))
-        encoder   = s_load(ckpt_path, ConvEncoder, device=str(device)).train()
+        model     = load(ckpt_path, FGN, device=str(device)).train()
     else:
-        config = {
-            "in_channels"  : in_channels,
-            "out_channels" : arch["lat_channels"],
-            "spatial"      : spatial,
-            **{k: v for k, v in arch.items() if k != "lat_channels"},
-        }
-        encoder = ConvEncoder(**config).to(device)
+        config = config_model
+        model  = FGN(**config).to(device)
 
-    return encoder, config
+    return model, config
+
+
+def _conditioning(dates: Sequence[str], device: torch.device) -> tuple[Tensor, Tensor]:
+    r"""Encode the dates of a batch as the conditioning of the FGN.
+
+    Arguments:
+        dates  : Date strings 'YYYY-MM-DD' of the forecasted states (B,).
+        device : Target device.
+
+    Returns:
+        cond_s : Surface conditioning (B, 2, Y, X).
+        cond_o : Ocean conditioning (B, 2, Z, Y, X).
+    """
+
+    encodings = [get_weights_date(date, dim=2, device=device) for date in dates]
+
+    return torch.cat([cond_s for cond_s, _ in encodings]), torch.cat([cond_o for _, cond_o in encodings])
+
+
+def forward_loss(
+    model   : torch.nn.Module,
+    batch   : tuple,
+    members : int,
+    weights : tuple[Tensor, Tensor],
+    device  : torch.device,
+) -> tuple[Tensor, Tensor]:
+    r"""Forecast the next states of a batch with an ensemble and compute its CRPS.
+
+    Arguments:
+        model   : FGN, possibly wrapped by DDP.
+        batch   : Window of previous and future states, with their dates, from NeptuneDataset.
+        members : Number of ensemble members E.
+        weights : Loss weights of the surface and ocean variables, from get_weights_loss.
+        device  : Target device.
+
+    Returns:
+        loss_surface : Weighted CRPS of the surface variables.
+        loss_ocean   : Weighted CRPS of the ocean variables.
+    """
+
+    x_inp_s, x_inp_o, x_out_s, x_out_o, dates = batch
+    fgn = model.module if hasattr(model, "module") else model
+
+    # The collate transposes the dates, dates[N] holds the date of the next state of each sample
+    cond_s, cond_o   = _conditioning(dates[x_inp_s.shape[1]], device)
+    x_inp_s, x_inp_o = x_inp_s.to(device), x_inp_o.to(device)
+    x_s, x_o         = x_out_s[:, 0].to(device), x_out_o[:, 0].to(device)
+
+    with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
+        x_pred_s, x_pred_o = model(x_inp_s, x_inp_o, cond_s, cond_o, members=members)
+
+    return loss_crps(
+        x_pred_s.float(), x_pred_o.float(), x_s, x_o, fgn.mask_surface, fgn.mask_ocean, *weights
+    )
 
 
 def training(
-    role: str,
-    joint_hash: str,
-    config_state: dict,
-    config_training: dict,
-    config_encoder: dict,
-    config_wandb: dict,
-    config_cluster: dict,
+    config_state    : dict,
+    config_training : dict,
+    config_model    : dict,
+    config_wandb    : dict,
+    config_cluster  : dict,
 ) -> None:
-    r"""Launch the training of a single (surface or ocean) encoder."""
+    r"""Launch the training of a FGN forecasting the next day.
 
-    n_channels, spatial = {
-        "surface" : (len(DATASET_VARIABLES_SURFACE), 2),
-        "ocean"   : (len(DATASET_VARIABLES_OCEAN), 3),
-    }[role]
+    Arguments:
+        config_state    : Checkpointing and saving options.
+        config_training : Ensemble, batch sizes, optimizer steps and learning rate schedule.
+        config_model    : Architecture of the FGN.
+        config_wandb    : Weights & Biases entity, project and mode.
+        config_cluster  : Slurm resources, logged alongside the run for traceability.
+    """
 
     # Initialize distributed setup
     rank, local_rank, world_size, device, is_distributed = setup_distributed()
@@ -89,40 +134,14 @@ def training(
     # Prevent xarray/dask deadlocks inside DataLoader workers
     dask.config.set(scheduler="synchronous")
 
-    # Weights & Biases | One run per encoder, named after its architecture and joint_hash
-    checkpoint_name = config_state[f"checkpoint_name_{role}"]
-    run_name = generate_run_name_ae(
-        joint_hash        = joint_hash,
-        in_channels       = n_channels,
-        lat_channels      = config_encoder["lat_channels"],
-        hid_channels      = config_encoder["hid_channels"],
-        hid_blocks        = config_encoder["hid_blocks"],
-        stride            = config_encoder["stride"],
-        spatial           = spatial,
-        previous_run_name = checkpoint_name,
-    )
-
-    if rank == 0:
-        wandb.init(
-            **config_wandb,
-            name=run_name,
-            config={
-                "State"           : config_state,
-                "Training"        : config_training,
-                "Architecture"    : config_encoder,
-                "Cluster"         : config_cluster,
-                "Hyperparameters" : get_wandb_hyperparameters([config_training, config_encoder]),
-            },
-        )
-    else:
-        wandb.init(mode="disabled")
-
     (
         saving,
-        checkpointing,
+        checkpoint_name,
+        members,
         steps_update,
         steps_logging,
-        steps_saving,
+        steps_validation,
+        batches_validation,
         batch_size_per_step,
         batch_size_per_gpu,
         num_workers,
@@ -133,12 +152,14 @@ def training(
         warmup_steps,
     ) = (
         config_state["saving"],
-        config_state["checkpointing"],
+        config_state["checkpoint_name"],
+        config_training["members"],
         config_training["steps_update"],
         config_training["steps_logging"],
-        config_training["steps_saving"],
-        config_training[f"batch_size_per_step_{role}"],
-        config_training[f"batch_size_per_gpu_{role}"],
+        config_training["steps_validation"],
+        config_training["batches_validation"],
+        config_training["batch_size_per_step"],
+        config_training["batch_size_per_gpu"],
         config_training["num_workers"],
         config_training["prefetch_factor"],
         config_training["learning_rate_start"],
@@ -147,50 +168,76 @@ def training(
         config_training["warmup_steps"],
     )
 
-    # Number of steps to accumulate gradients before updating model parameters
-    batch_size_per_process      = batch_size_per_gpu * world_size
-    steps_gradient_accumulation = max(1, (batch_size_per_step + batch_size_per_process - 1) // batch_size_per_process)
-    batches                     = [steps_update * steps_gradient_accumulation, None, None]
+    # Model | Loading a checkpoint or building from scratch
+    model, config = _build_model(config_model, checkpoint_name, device)
 
-    dataloader_training, _, _ = get_dataloaders(
+    # Weights & Biases | Run named after the architecture
+    run_name = generate_run_name_fgn(
+        input_states      = model.input_states,
+        lat_channels      = model.lat_channels,
+        compression       = model.compression()[2],
+        tokens            = sum(model.tokens),
+        hid_channels      = model.processor.in_proj.out_features,
+        hid_blocks        = len(model.processor.blocks),
+        previous_run_name = checkpoint_name,
+    )
+
+    if rank == 0:
+        wandb.init(
+            **config_wandb,
+            name=run_name,
+            config={
+                "State"           : config_state,
+                "Training"        : config_training,
+                "Model"           : config,
+                "Cluster"         : config_cluster,
+                "Hyperparameters" : get_wandb_hyperparameters({**config_training, **config}),
+            },
+        )
+        wandb.log({
+            "Informations/Trainable Parameters [M]" : sum(p.numel() for p in model.parameters()) / 1e6,
+            "Informations/Tokens"                   : sum(model.tokens),
+            "Informations/Compression"              : model.compression()[2],
+        })
+    else:
+        wandb.init(mode="disabled")
+
+    # Number of steps to accumulate gradients before updating model parameters
+    steps_gradient_accumulation = max(1, math.ceil(batch_size_per_step / (batch_size_per_gpu * world_size)))
+    batches = [
+        steps_update * steps_gradient_accumulation,
+        steps_update // steps_validation * batches_validation,
+        None,
+    ]
+
+    dataloader_training, dataloader_validation, _ = get_dataloaders(
         batch_size      = batch_size_per_gpu,
         num_workers     = num_workers,
         prefetch_factor = prefetch_factor,
         batches         = batches,
-        shuffle         = [True, False, False],
-        infinite        = [True, False, False],
+        shuffle         = [True, True, False],
+        infinite        = [True, True, False],
         rank            = rank,
         world_size      = world_size,
         is_distributed  = is_distributed,
+        input_states    = model.input_states,
+        output_states   = 1,
     )
 
-    # Land/sea mask | One extra input channel, appended along the channel axis
-    mask_full = get_weights_mask(dim=1, device=device)                  # (Z, Y, X)
-    w_mask    = mask_full[0][None, None] if role == "surface" else mask_full[None, None]
+    # Loss | CRPS of the normalized increments, averaged over the non-constant variable-levels
+    weights = get_weights_loss(device=device)
 
-    # Model | Loading a checkpoint or building from scratch
-    encoder, ckpt_config = _build_encoder(
-        in_channels     = n_channels + 1,
-        spatial         = spatial,
-        arch            = {**config_encoder, "checkpointing": checkpointing},
-        checkpoint_name = checkpoint_name,
-        device          = device,
-    )
-
-    # Model | Defining if DDP or DataParallel
+    # Model | Masks, meshes and statistics are identical on every process, no need to broadcast them
     if is_distributed:
         ddp_kwargs = {"device_ids": [local_rank], "output_device": local_rank} if device.type == "cuda" else {}
-        encoder    = DDP(encoder, **ddp_kwargs)
-    elif torch.cuda.device_count() > 1:
-        encoder = torch.nn.DataParallel(encoder, device_ids=list(range(torch.cuda.device_count()))).to(device)
-
-    # Logging number of trainable parameters
-    if rank == 0:
-        n_params = sum(p.numel() for p in encoder.parameters() if p.requires_grad)
-        wandb.log({"Informations/Trainable Parameters [M]": n_params / 1e6})
+        model      = DDP(model, broadcast_buffers=False, **ddp_kwargs)
 
     # Setting up training tools
-    optimizer = SOAP(encoder.parameters(), lr=lr_peak, max_precond_size=128)
+    optimizer = SOAP(
+        model.parameters(),
+        lr=lr_peak,
+    )
+
     scheduler = warmup_cosine_decay(
         optimizer    = optimizer,
         lr_start     = lr_start,
@@ -200,11 +247,9 @@ def training(
         total_steps  = steps_update,
     )
 
-    scaler                   = GradScaler(enabled=False)
-    loss_accumulator         = 0.0
-    loss_logging_accumulator = 0.0
-    loss_mean                = float("inf")
-    loss_best                = float("inf")
+    loss_accumulator         = torch.zeros(2)
+    loss_logging_accumulator = torch.zeros(2)
+    loss_validation_best     = float("inf")
     gradient_norm            = float("inf")
     optimizer_step           = 0
 
@@ -212,82 +257,89 @@ def training(
     if is_distributed:
         dist.barrier(device_ids=[local_rank] if device.type == "cuda" else None)
 
-    for step, sample in enumerate(dataloader_training):
-        x = sample[0] if role == "surface" else sample[1]
+    for step, batch in enumerate(dataloader_training):
 
-        # Pushing to device and concatenating the land/sea mask
-        x = x.to(device)
-        x_in = torch.cat([x, w_mask.expand(x.shape[0], *([-1] * (w_mask.dim() - 1)))], dim=1)
-
-        with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
-
-            # Forward pass
-            z = encoder(x_in)
-
-            # Computing loss
-            loss = loss_geometry_embedding(x, z)
+        # Forward pass and loss (surface, ocean)
+        loss_surface, loss_ocean = forward_loss(model, batch, members, weights, device)
 
         # Gradient accumulation
-        loss              = loss / steps_gradient_accumulation
-        loss_accumulator += loss.item()
-
-        # Logging to console if not using WandB
-        if config_wandb["mode"] == "disabled":
-            print(f"Step {optimizer_step:6d} | Loss: {loss_accumulator:.4f} | γ: {scheduler.get_last_lr()[0]:.6f} | ∇: {gradient_norm:.4f}")
+        loss              = (loss_surface + loss_ocean) / steps_gradient_accumulation
+        loss_accumulator += torch.tensor([loss_surface.item(), loss_ocean.item()]) / steps_gradient_accumulation
 
         # Only sync gradients on last accumulation step
         is_last_accumulation_step = ((step + 1) % steps_gradient_accumulation == 0)
 
         if is_distributed and not is_last_accumulation_step:
-            with encoder.no_sync():
-                scaler.scale(loss).backward()
+            with model.no_sync():
+                loss.backward()
         else:
-            scaler.scale(loss).backward()
+            loss.backward()
 
         # Cleaning up memory
-        del x, x_in, z
+        del batch, loss, loss_surface, loss_ocean
+
+        if not is_last_accumulation_step:
+            continue
 
         # Optimization step
-        if is_last_accumulation_step:
-            gradient_norm             = safe_gradient_step(optimizer=optimizer, scaler=scaler, grad_clip=1.0)
-            loss_to_log               = loss_accumulator
-            loss_logging_accumulator += loss_to_log
-            loss_accumulator          = 0.0
-            optimizer_step           += 1
-            scheduler.step()
-            del loss
+        gradient_norm             = safe_gradient_step(optimizer=optimizer, grad_clip=1.0)
+        loss_step                 = loss_accumulator.sum().item()
+        loss_logging_accumulator += loss_accumulator
+        loss_accumulator          = torch.zeros(2)
+        optimizer_step           += 1
+        scheduler.step()
 
-        # Logging results
-        if optimizer_step % steps_logging == 0 and is_last_accumulation_step:
+        # Logging to console if not using WandB
+        if config_wandb["mode"] == "disabled":
+            print(f"Step {optimizer_step:6d} | Loss: {loss_step:.4f} | γ: {scheduler.get_last_lr()[0]:.6f} | ∇: {gradient_norm:.4f}")
 
-            # Average loss over logging window
-            loss_mean                = loss_logging_accumulator / steps_logging
-            loss_logging_accumulator = 0.0
+        # Logging results, averaged over the logging window and the processes
+        if optimizer_step % steps_logging == 0:
+            loss_mean_surface, loss_mean_ocean = (loss_logging_accumulator / steps_logging).tolist()
+            loss_logging_accumulator           = torch.zeros(2)
 
-            # Average across distributed processes
             if is_distributed:
-                loss_mean = reduce_mean(loss_mean, device)
+                loss_mean_surface = reduce_mean(loss_mean_surface, device)
+                loss_mean_ocean   = reduce_mean(loss_mean_ocean, device)
 
-            # Logging
             if rank == 0:
                 wandb.log({
-                    "Training/Loss"              : loss_mean,
+                    "Training/Loss"              : loss_mean_surface + loss_mean_ocean,
+                    "Training/Loss (Surface)"    : loss_mean_surface,
+                    "Training/Loss (Ocean)"      : loss_mean_ocean,
                     "Informations/Steps Update"  : optimizer_step,
                     "Informations/Samples Seen"  : (step + 1) * batch_size_per_gpu * world_size,
                     "Informations/Gradient Norm" : gradient_norm,
                     "Informations/Learning Rate" : scheduler.get_last_lr()[0],
                 })
 
-        # Saving checkpoint
-        if saving and optimizer_step % steps_saving == 0 and is_last_accumulation_step and optimizer_step > 0 and rank == 0:
-            if loss_mean < loss_best:
+        # Validation, and saving the best model
+        if optimizer_step % steps_validation == 0:
+            model.eval()
+            loss_validation = torch.zeros(2)
+            with torch.no_grad():
+                for _ in range(batches_validation):
+                    loss_surface, loss_ocean = forward_loss(model, next(dataloader_validation), members, weights, device)
+                    loss_validation         += torch.tensor([loss_surface.item(), loss_ocean.item()]) / batches_validation
+            model.train()
 
-                # Extracting raw model and saving (overwrites the previous checkpoint for this run)
-                raw_encoder = encoder.module if hasattr(encoder, "module") else encoder
-                s_save(raw_encoder, ckpt_config, PATH_MODELS / run_name)
+            loss_validation_surface, loss_validation_ocean = loss_validation.tolist()
+            if is_distributed:
+                loss_validation_surface = reduce_mean(loss_validation_surface, device)
+                loss_validation_ocean   = reduce_mean(loss_validation_ocean, device)
 
-                # Updating best loss
-                loss_best = loss_mean
+            if rank == 0:
+                wandb.log({
+                    "Validation/Loss"           : loss_validation_surface + loss_validation_ocean,
+                    "Validation/Loss (Surface)" : loss_validation_surface,
+                    "Validation/Loss (Ocean)"   : loss_validation_ocean,
+                    "Informations/Steps Update" : optimizer_step,
+                })
+
+                if saving and loss_validation_surface + loss_validation_ocean < loss_validation_best:
+                    raw_model            = model.module if hasattr(model, "module") else model
+                    loss_validation_best = loss_validation_surface + loss_validation_ocean
+                    save(raw_model, config, PATH_MODELS / run_name)
 
     # Closing run
     wandb.finish()
@@ -297,7 +349,7 @@ def training(
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Submit the surface and ocean encoder trainings.")
+    parser = argparse.ArgumentParser(description="Launch a FGN training pipeline.")
     parser.add_argument(
         "--config",
         "-c",
@@ -319,7 +371,6 @@ if __name__ == "__main__":
     configs        = load_configuration(args.config)
     config_wandb   = configs[0]["WandB"]
     config_cluster = configs[0]["Cluster"]
-    joint_hash     = secrets.token_hex(2).upper()
 
     nodes         = config_cluster["nodes"]
     gpus_per_node = config_cluster["gpus-per-node"]
@@ -328,15 +379,13 @@ if __name__ == "__main__":
 
     # Local
     if args.backend == "async":
-        for role in ("surface", "ocean"):
+        for config in configs:
             training(
-                role=role,
-                joint_hash=joint_hash,
-                config_state=configs[0]["State"],
-                config_training=configs[0]["Training"],
-                config_encoder=configs[0]["Encoders"][role.capitalize()],
-                config_wandb=config_wandb,
-                config_cluster=config_cluster,
+                config_state    = config["State"],
+                config_training = config["Training"],
+                config_model    = config["Model"],
+                config_wandb    = config_wandb,
+                config_cluster  = config_cluster,
             )
 
     # Cluster
@@ -347,7 +396,16 @@ if __name__ == "__main__":
         import neptune.data.dataloader
         import neptune.data.dataset
         import neptune.data.weights
-        for _mod in [neptune.data, neptune.data.dataset, neptune.data.weights, neptune.data.dataloader]:
+        import neptune.loss
+        import neptune.model.fgn
+        for _mod in [
+            neptune.data,
+            neptune.data.dataset,
+            neptune.data.weights,
+            neptune.data.dataloader,
+            neptune.loss,
+            neptune.model.fgn,
+        ]:
             cloudpickle.register_pickle_by_value(_mod)
 
         if nodes > 1:
@@ -359,46 +417,31 @@ if __name__ == "__main__":
         else:
             interpreter = f"torchrun --nnodes 1 --nproc-per-node {gpus_per_node} --standalone"
 
-        job_kwargs = dict(
-            array=len(configs),
-            nodes=nodes,
-            gpus=gpus_per_node,
-            cpus=cpus_per_node,
-            ram=ram_per_node,
-            time=config_cluster["time"],
-            account=config_cluster["account"],
-            partition=config_cluster["partition"],
+        @job(
+            array     = len(configs),
+            nodes     = nodes,
+            gpus      = gpus_per_node,
+            cpus      = cpus_per_node,
+            ram       = ram_per_node,
+            time      = config_cluster["time"],
+            account   = config_cluster["account"],
+            partition = config_cluster["partition"],
         )
+        def train(i: int) -> None:
+            r"""Train the FGN of the i-th configuration."""
 
-        @dawgz.job(**job_kwargs)
-        def train_surface(i: int) -> None:
             training(
-                role="surface",
-                joint_hash=joint_hash,
-                config_state=configs[i]["State"],
-                config_training=configs[i]["Training"],
-                config_encoder=configs[i]["Encoders"]["Surface"],
-                config_wandb=config_wandb,
-                config_cluster=config_cluster,
+                config_state    = configs[i]["State"],
+                config_training = configs[i]["Training"],
+                config_model    = configs[i]["Model"],
+                config_wandb    = config_wandb,
+                config_cluster  = config_cluster,
             )
 
-        @dawgz.job(**job_kwargs)
-        def train_ocean(i: int) -> None:
-            training(
-                role="ocean",
-                joint_hash=joint_hash,
-                config_state=configs[i]["State"],
-                config_training=configs[i]["Training"],
-                config_encoder=configs[i]["Encoders"]["Ocean"],
-                config_wandb=config_wandb,
-                config_cluster=config_cluster,
-            )
-
-        dawgz.schedule(
-            train_surface,
-            train_ocean,
-            name="E3D-TRAIN",
+        schedule(
+            train,
+            name="NEPT-TRAIN",
             backend="slurm",
             interpreter=interpreter,
-            export="ALL"
+            export="ALL",
         )

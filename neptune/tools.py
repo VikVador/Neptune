@@ -2,7 +2,7 @@ r"""A collection of tools for various tasks."""
 
 __all__ = [
     "load_configuration",
-    "generate_run_name_ae",
+    "generate_run_name_fgn",
     "extract_model_hash",
     "get_wandb_hyperparameters",
 ]
@@ -27,10 +27,12 @@ def load_configuration(path: str | Path) -> list[dict[str, Any]]:
 
     def _generate_combinations(d: dict[str, Any]) -> list[dict[str, Any]]:
         r"""Recursively generate parameter combinations."""
+
         if isinstance(d, dict):
             combinations = {k: _generate_combinations(v) for k, v in d.items()}
             keys, values = zip(*combinations.items(), strict=False)
             return [dict(zip(keys, combo, strict=False)) for combo in product(*values)]
+
         return d if isinstance(d, list) else [d]
 
     # Open and read the YAML configuration file
@@ -46,37 +48,35 @@ def load_configuration(path: str | Path) -> list[dict[str, Any]]:
     return _generate_combinations(config)
 
 
-def generate_run_name_ae(
-    joint_hash: str,
-    in_channels: int,
+def generate_run_name_fgn(
+    input_states: int,
     lat_channels: int,
-    hid_channels: list[int],
-    hid_blocks: list[int],
-    stride: int,
-    spatial: int = 2,
+    compression: float,
+    tokens: int,
+    hid_channels: int,
+    hid_blocks: int,
     previous_run_name: str | None = None,
 ) -> str:
-    r"""Generate a descriptive WandB run name encoding the convolutional autoencoder architecture.
+    r"""Generate a descriptive WandB run name encoding the FGN architecture.
 
     Arguments:
-        joint_hash        : Hash shared by all encoders launched together.
-        in_channels       : Number of physical input channels.
+        input_states      : Number of previous states given as input.
         lat_channels      : Number of latent channels.
-        hid_channels      : List of hidden channels per stage.
-        hid_blocks        : List of blocks per stage
-        stride            : Spatial stride per stage.
-        spatial           : Number of spatial dimensions the stride is applied over.
+        compression       : Total compression factor of the states into latent tokens.
+        tokens            : Number of latent tokens processed by the transformer.
+        hid_channels      : Number of hidden channels of the transformer.
+        hid_blocks        : Number of blocks of the transformer.
         previous_run_name : WandB name of the resumed run, if any.
 
     Returns:
-        name : Run name of the form CAE_{joint_hash}_{spatial}D_ic{}_lc{}_st{}_cf{}__XXX[_YYY].
+        name : Run name of the form FGN_in{}_lc{}_cf{}_tk{}_hc{}_hb{}__XXX[_YYY].
     """
-    ic = hid_channels[0]
-    lc = lat_channels
-    st = len(hid_blocks) - 1
-    cf = round(stride ** (spatial * st) * in_channels / lat_channels)
+
     xxx = secrets.token_hex(2).upper()
-    name = f"CAE_{joint_hash}_{spatial}D_ic{ic}_lc{lc}_st{st}_cf{cf}__{xxx}"
+    name = (
+        f"FGN_in{input_states}_lc{lat_channels}_cf{round(compression)}_tk{tokens}"
+        f"_hc{hid_channels}_hb{hid_blocks}__{xxx}"
+    )
 
     if previous_run_name is not None:
         name = f"{name}_{extract_model_hash(previous_run_name)}"
@@ -88,7 +88,7 @@ def extract_model_hash(run_name: str) -> str:
     r"""Extract the unique model-identifying hash from a run name.
 
     Arguments:
-        run_name : Run name of the form ..._{spatial}D_..._cf{}__XXX[_YYY].
+        run_name : Run name of the form FGN_..._hb{}__XXX[_YYY].
 
     Returns:
         hash : The XXX hash identifying this specific model.
@@ -96,43 +96,25 @@ def extract_model_hash(run_name: str) -> str:
     return run_name.split("__")[-1].split("_")[0]
 
 
-def get_wandb_hyperparameters(configs: list[dict]) -> dict[str, Any]:
-    r"""Flatten a configuration into a WandB-compatible hyperparameter dictionnary for analysis."""
+def get_wandb_hyperparameters(config: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    r"""Flatten a nested configuration into scalar hyperparameters, for WandB analysis.
+
+    Arguments:
+        config : Nested configuration, e.g. {"config_processor": {"hid_channels": 512}}.
+        prefix : Prefix of the flattened names, used by the recursion.
+
+    Returns:
+        params : Hyperparameters, e.g. {"config_processor/hid_channels": 512}.
+    """
+
     params = {}
-    for cfg in configs:
-        for k, v in cfg.items():
-            if k == "learning_rate":
-                params["Learning Rate"] = v
-            elif k == "batch_size_per_step":
-                params["Batch Size"] = v
-            elif k == "hid_channels" and isinstance(v, list):
-                params["Number of Stages"] = len(v)
-                for i, h in enumerate(v):
-                    params[f"Hidden Channels (Stage {i})"] = h
-            elif k == "hid_blocks" and isinstance(v, list):
-                for i, b in enumerate(v):
-                    params[f"Hidden Blocks (Stage {i})"] = b
-            elif k == "lat_channels":
-                params["Latent Channels"] = v
-            elif k == "kernel_size":
-                params["Kernel Size"] = v
-            elif k == "stride":
-                params["Stride"] = v
-            elif k == "ffn_factor":
-                params["FFN Scaling Factor"] = v
-            elif k == "dropout":
-                params["Dropout"] = v
-            elif k == "hid_channels" and isinstance(v, int):
-                params["Hidden Channels"] = v
-            elif k == "hid_blocks" and isinstance(v, int):
-                params["Hidden Blocks"] = v
-            elif k == "enc_features":
-                params["Sine Encoding Features"] = v
-            elif k == "patch_size":
-                params["Patch Size"] = v
-            elif k == "input_states":
-                params["Input States"] = v
-            elif k == "output_states":
-                params["Output States"] = v
+    for key, value in config.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            params |= get_wandb_hyperparameters(value, prefix=f"{name}/")
+        elif isinstance(value, list):
+            params |= {f"{name}/{i}": v for i, v in enumerate(value)}
+        else:
+            params[name] = value
 
     return params
