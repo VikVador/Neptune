@@ -11,6 +11,7 @@ from azula.nn.dit import DiT
 from collections.abc import Sequence
 from shaggy.models.cae import create_ConvAE
 from torch import Tensor
+from tqdm.auto import tqdm
 from typing import Any
 
 from neptune.data import (
@@ -266,3 +267,54 @@ class FGN(nn.Module):
         x_out_o = x_out_o * self.mask_ocean
 
         return x_out_s.unflatten(0, (batch, members)), x_out_o.unflatten(0, (batch, members))
+
+    @torch.no_grad()
+    def forecast(
+        self,
+        x_inp_s: Tensor,
+        x_inp_o: Tensor,
+        cond_s: Tensor,
+        cond_o: Tensor,
+        members: int = 1,
+        progress: bool = False,
+    ) -> tuple[Tensor, Tensor]:
+        r"""Forecast autoregressively the next K surface and ocean states, for each ensemble member.
+
+        Each member is rolled out on its own, its forecast being fed back as its next input. The
+        forecasted states are moved to the CPU as they come, to spare the memory of the device.
+
+        Arguments:
+            x_inp_s  : Previous surface states (B, N, C_s, Y, X).
+            x_inp_o  : Previous ocean states (B, N, C_o, Z, Y, X).
+            cond_s   : Surface conditioning of each forecasted day (B, K, C_cs, Y, X).
+            cond_o   : Ocean conditioning of each forecasted day (B, K, C_co, Z, Y, X).
+            members  : Number of ensemble members E.
+            progress : Whether to display a progress bar over the forecasted days.
+
+        Returns:
+            x_out_s : Forecasted surface states, on the CPU (B, E, K, C_s, Y, X).
+            x_out_o : Forecasted ocean states, on the CPU (B, E, K, C_o, Z, Y, X).
+        """
+
+        batch, days = cond_s.shape[:2]
+
+        # Each member is rolled out as a sample of its own, (B, ...) → (B * E, ...)
+        x_inp_s, x_inp_o, cond_s, cond_o = (
+            t.repeat_interleave(members, dim=0) for t in (x_inp_s, x_inp_o, cond_s, cond_o)
+        )
+
+        forecast_s, forecast_o = [], []
+        for k in tqdm(range(days), desc="Forecast", disable=not progress):
+            x_s, x_o = self(x_inp_s, x_inp_o, cond_s[:, k], cond_o[:, k])
+            x_s, x_o = x_s[:, 0], x_o[:, 0]
+            forecast_s.append(x_s.cpu())
+            forecast_o.append(x_o.cpu())
+
+            # Sliding window | Oldest state out, forecast in
+            x_inp_s = torch.cat([x_inp_s[:, 1:], x_s[:, None]], dim=1)
+            x_inp_o = torch.cat([x_inp_o[:, 1:], x_o[:, None]], dim=1)
+
+        return (
+            torch.stack(forecast_s, dim=1).unflatten(0, (batch, members)),
+            torch.stack(forecast_o, dim=1).unflatten(0, (batch, members)),
+        )

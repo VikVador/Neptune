@@ -88,6 +88,23 @@ def test_fgn_forward(fgn: FGN, inputs: tuple[torch.Tensor, ...]) -> None:
 
 
 @pytest.mark.integration
+def test_fgn_forecast(fgn: FGN, inputs: tuple[torch.Tensor, ...]) -> None:
+    r"""Determines if a rollout returns K days per member, each member evolving on its own."""
+
+    x_inp_s, x_inp_o, cond_s, cond_o = inputs
+    cond_s, cond_o = (
+        cond_s[:, None].expand(-1, 3, -1, -1, -1),
+        cond_o[:, None].expand(-1, 3, -1, -1, -1, -1),
+    )
+    x_out_s, x_out_o = fgn.forecast(x_inp_s, x_inp_o, cond_s, cond_o, members=2)
+
+    assert x_out_s.shape == (1, 2, 3, C_S, Y, X)
+    assert x_out_o.shape == (1, 2, 3, C_O, Z, Y, X)
+    assert x_out_o.device.type == "cpu"
+    assert not torch.equal(x_out_o[:, 0, -1], x_out_o[:, 1, -1])
+
+
+@pytest.mark.integration
 def test_fgn_postprocess(fgn: FGN) -> None:
     r"""Determines if the states are clipped to their bounds, constants being set to 0."""
 

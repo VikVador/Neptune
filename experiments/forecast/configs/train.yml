@@ -14,7 +14,7 @@ Cluster:
 
 State:
     "saving"          : [true]
-    "checkpoint_name" : [null]
+    "checkpoint_name" : ["FGN_in2_lc512_cf60_tk2304_hc1024_hb16__DBE0"]
 
 Training:
     "members"             : [2]
@@ -39,7 +39,6 @@ Model:
     "config_surface":
         "hid_channels"  : [[16, 32, 64, 128, 128]]
         "hid_blocks"    : [[3, 3, 3, 3, 3]]
-        "hid_groups"    : [[1, 1, 0, 0, 0]]
         "kernel_size"   : [3]
         "stride"        : [2]
         "ffn_factor"    : [1]
@@ -49,7 +48,6 @@ Model:
     "config_ocean":
         "hid_channels"  : [[32, 64, 128, 256, 256]]
         "hid_blocks"    : [[3, 3, 3, 3, 3]]
-        "hid_groups"    : [[1, 1, 0, 0, 0]]
         "kernel_size"   : [3]
         "stride"        : [2]
         "ffn_factor"    : [1]
