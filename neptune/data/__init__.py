@@ -2,6 +2,7 @@ r"""Information about our dataset"""
 
 __all__ = [
     "VARIABLES_CLIPPING",
+    "VARIABLES_STANDARDIZATION",
     "DATASET_DATES_TRAINING",
     "DATASET_DATES_VALIDATION",
     "DATASET_DATES_TEST",
@@ -27,6 +28,24 @@ VARIABLES_CLIPPING = {
     "PHO":      (0, None),
     "SIO":      (0, None),
     "NOS":      (0, None),
+}
+
+VARIABLES_STANDARDIZATION = {
+    "windsp"   : "daily",
+    "tauuo"    : "daily",
+    "tauvo"    : "daily",
+    "ssh"      : "daily",
+    "uo"       : "global",
+    "vo"       : "global",
+    "votemper" : "daily",
+    "vosaline" : "global",
+    "CHL"      : "global",
+    "DOX"      : "daily",
+    "PAR"      : "daily",
+    "PHO"      : "global",
+    "SIO"      : "global",
+    "NOS"      : "global",
+    "default"  : "daily",
 }
 
 # ----- Black Sea

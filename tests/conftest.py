@@ -20,7 +20,8 @@ def pytest_collection_modifyitems(
 ) -> None:
     r"""Auto-skip integration tests if GPFS paths are unavailable."""
 
-    if all(path.exists() for path in (PATH_MASK, PATH_PATHS, PATH_STATS, PATH_STATS_INCREMENTS)):
+    paths = (PATH_MASK, PATH_PATHS, PATH_STATS_INCREMENTS, *PATH_STATS.values())
+    if all(path.exists() for path in paths):
         return
     skip_integration = pytest.mark.skip(reason="GPFS paths unavailable")
     for item in items:

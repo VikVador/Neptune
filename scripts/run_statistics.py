@@ -1,4 +1,4 @@
-r"""Script to compute global mean and standard deviation of all dataset variables."""
+r"""Script to compute the mean and standard deviation of all dataset variables, over sea points."""
 
 import argparse
 import dask
@@ -8,11 +8,10 @@ import pickle
 import xarray as xr
 
 from dawgz import after, job, schedule
-from pathlib import Path
 
 from neptune.config import PATH_MASK, PATH_NEP_SCRATCH, PATH_STATS
 from neptune.data import DATASET_DATES_TRAINING
-from neptune.data.statistics import OnlineStats, clean
+from neptune.data.statistics import ChunkedStats, OnlineStats, clean
 from neptune.data.tools import generate_paths
 from neptune.tools import load_configuration
 
@@ -21,6 +20,9 @@ PATH_TMP = PATH_NEP_SCRATCH / "tmp" / "statistics"
 
 # Number of years per task, small tasks balancing the load between processes
 YEARS_PER_TASK = 2
+
+# Statistics over a given period
+MODES = ["global", "monthly", "daily"]
 
 
 # fmt: off
@@ -77,6 +79,7 @@ def compute_stats(
     depth_dim: str | None,
     levels: list[tuple[int, float]],
     period: tuple[int, int],
+    modes: list[str],
 ) -> None:
     r"""Compute online mean and std for one variable (all levels) over the sea points of a period.
 
@@ -85,6 +88,7 @@ def compute_stats(
         depth_dim : Name of the depth dimension, or None for 2D variables.
         levels    : (level_index, depth_value) pairs, empty for 2D variables.
         period    : First and last year of the training period to cover.
+        modes     : Statistics to compute, among 'global', 'monthly' and 'daily'.
     """
 
     dask.config.set(scheduler="synchronous")
@@ -93,8 +97,12 @@ def compute_stats(
     # Land is either NaN or 0 in the raw files, the mask sets it to NaN everywhere
     mask = xr.open_zarr(PATH_MASK).mask.values
 
+    # Accumulators fed with every value (global), or with the statistics of each month or day
     level_depth_pairs = levels if levels else [(None, None)]
-    stats_map = {lvl: OnlineStats() for lvl, _ in level_depth_pairs}
+    stats_map = {
+        mode: {lvl: OnlineStats() if mode == "global" else ChunkedStats() for lvl, _ in level_depth_pairs}
+        for mode in modes
+    }
 
     for month, month_paths in sorted(generate_paths().items()):
         if not (date_start[:7] <= month <= date_end[:7] and period[0] <= int(month[:4]) <= period[1]):
@@ -118,32 +126,45 @@ def compute_stats(
         for lvl, _ in level_depth_pairs:
             data = da.isel({depth_dim: lvl}).values if lvl is not None else da.values
             data = np.where(mask[lvl if lvl is not None else 0] == 1, data, np.nan)
-            stats_map[lvl].update(clean(data.astype(np.float32), var))
+            data = clean(data.astype(np.float32), var)
+
+            # A month of data (days, Y, X) is one chunk, or one chunk per day in daily mode
+            for mode in modes:
+                for chunk in data if mode == "daily" else [data]:
+                    stats_map[mode][lvl].update(chunk)
 
     with open(PATH_TMP / f"{var}_{period[0]}.pkl", "wb") as f:
         pickle.dump(
             {
                 "var": var,
                 "depth_dim": depth_dim,
-                "levels": {lvl: {"depth_val": dv, "stats": stats_map[lvl]} for lvl, dv in level_depth_pairs},
+                "levels": {
+                    lvl: {"depth_val": dv, "stats": {mode: stats_map[mode][lvl] for mode in modes}}
+                    for lvl, dv in level_depth_pairs
+                },
             },
             f,
         )
 
 
-def compute_stats_serial(tasks: list[tuple[tuple[str, str | None, list], tuple[int, int]]]) -> None:
+def compute_stats_serial(
+    tasks: list[tuple[tuple[str, str | None, list], tuple[int, int]]],
+    modes: list[str],
+) -> None:
     r"""Compute the statistics of several (variable, period) pairs, one after the other.
 
     Arguments:
         tasks : ((var, depth_dim, levels), period) pairs.
+        modes : Statistics to compute, among 'global', 'monthly' and 'daily'.
     """
 
     for (var, depth_dim, levels), period in tasks:
-        compute_stats(var, depth_dim, levels, period)
+        compute_stats(var, depth_dim, levels, period, modes)
 
 
 def compute_stats_parallel(
     tasks: list[tuple[tuple[str, str | None, list], tuple[int, int]]],
+    modes: list[str],
     processes: int,
 ) -> None:
     r"""Compute the statistics of several (variable, period) pairs, shared between processes.
@@ -152,11 +173,12 @@ def compute_stats_parallel(
 
     Arguments:
         tasks     : ((var, depth_dim, levels), period) pairs.
+        modes     : Statistics to compute, among 'global', 'monthly' and 'daily'.
         processes : Number of parallel processes.
     """
 
     context = multiprocessing.get_context("fork")
-    workers = [context.Process(target=compute_stats_serial, args=(tasks[k::processes],)) for k in range(processes)]
+    workers = [context.Process(target=compute_stats_serial, args=(tasks[k::processes], modes)) for k in range(processes)]
 
     for worker in workers:
         worker.start()
@@ -169,11 +191,11 @@ def compute_stats_parallel(
         raise RuntimeError(f"ERROR - {len(failed)} processes failed with exit codes {failed}.")
 
 
-def aggregate_stats(path_output: Path) -> None:
-    r"""Merge the partial statistics of every period and assemble the final statistics dataset.
+def aggregate_stats(modes: list[str]) -> None:
+    r"""Merge the partial statistics of every period and save one statistics dataset per mode.
 
     Arguments:
-        path_output : Path to the output .zarr file.
+        modes : Statistics to aggregate, among 'global', 'monthly' and 'daily', saved in PATH_STATS.
     """
 
     entries = {}
@@ -185,34 +207,36 @@ def aggregate_stats(path_output: Path) -> None:
             entries[entry["var"]] = entry
         else:
             for lvl, level in entry["levels"].items():
-                entries[entry["var"]]["levels"][lvl]["stats"].merge(level["stats"])
+                for mode in modes:
+                    entries[entry["var"]]["levels"][lvl]["stats"][mode].merge(level["stats"][mode])
 
-    data_vars = {}
-    for var, entry in entries.items():
-        depth_dim, levels = entry["depth_dim"], entry["levels"]
+    for mode in modes:
+        data_vars = {}
+        for var, entry in entries.items():
+            depth_dim, levels = entry["depth_dim"], entry["levels"]
 
-        if depth_dim is None:
-            stats = levels[None]["stats"]
-            data_vars[var] = xr.DataArray(
-                [stats.mean, stats.std],
-                dims=["statistic"],
-                coords={"statistic": ["mean", "std"]},
-            )
-        else:
-            sorted_keys = sorted(levels)
-            data_vars[var] = xr.DataArray(
-                np.array([
-                    [levels[k]["stats"].mean for k in sorted_keys],
-                    [levels[k]["stats"].std for k in sorted_keys],
-                ]),
-                dims=["statistic", depth_dim],
-                coords={
-                    "statistic": ["mean", "std"],
-                    depth_dim: [levels[k]["depth_val"] for k in sorted_keys],
-                },
-            )
+            if depth_dim is None:
+                stats = levels[None]["stats"][mode]
+                data_vars[var] = xr.DataArray(
+                    [stats.mean, stats.std],
+                    dims=["statistic"],
+                    coords={"statistic": ["mean", "std"]},
+                )
+            else:
+                sorted_keys = sorted(levels)
+                data_vars[var] = xr.DataArray(
+                    np.array([
+                        [levels[k]["stats"][mode].mean for k in sorted_keys],
+                        [levels[k]["stats"][mode].std for k in sorted_keys],
+                    ]),
+                    dims=["statistic", depth_dim],
+                    coords={
+                        "statistic": ["mean", "std"],
+                        depth_dim: [levels[k]["depth_val"] for k in sorted_keys],
+                    },
+                )
 
-    xr.Dataset(data_vars).to_zarr(path_output, mode="w")
+        xr.Dataset(data_vars).to_zarr(PATH_STATS[mode], mode="w")
 
 
 if __name__ == "__main__":
@@ -227,11 +251,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--path_output",
-        "-o",
-        type=Path,
-        default=PATH_STATS,
-        help="Path to the output .zarr file (default: PATH_STATS).",
+        "--modes",
+        "-m",
+        type=str,
+        nargs="+",
+        default=MODES,
+        choices=MODES,
+        help="Statistics to compute, saved in PATH_STATS (default: all of them).",
     )
 
     parser.add_argument(
@@ -255,14 +281,16 @@ if __name__ == "__main__":
     config_compute   = config["Compute"]
     config_aggregate = config["Aggregate"]
     jobs             = config_compute.pop("jobs")
+    modes            = args.modes
 
     # Aggregation only
     if args.aggregate_only:
-        aggregate_stats(args.path_output)
+        aggregate_stats(modes)
 
     # Computation and aggregation
     else:
         tasks = [(entry, period) for entry in list_dataset_variables() for period in list_periods()]
+        jobs  = min(jobs, len(tasks))
 
         # Removing the partial statistics of a previous run
         PATH_TMP.mkdir(parents=True, exist_ok=True)
@@ -272,13 +300,13 @@ if __name__ == "__main__":
         @job(array=jobs, **config_compute)
         def compute(i: int) -> None:
             r"""Compute the statistics of the i-th share of (variable, period) pairs, one process per CPU."""
-            compute_stats_parallel(tasks[i::jobs], processes=config_compute["cpus"])
+            compute_stats_parallel(tasks[i::jobs], modes, processes=config_compute["cpus"])
 
         @after(compute)
         @job(**config_aggregate)
         def aggregate() -> None:
-            r"""Merge the statistics of every period into the final dataset."""
-            aggregate_stats(args.path_output)
+            r"""Merge the statistics of every period into one dataset per mode."""
+            aggregate_stats(modes)
 
         schedule(
             aggregate,
