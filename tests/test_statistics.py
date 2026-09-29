@@ -2,7 +2,7 @@ r"""Tests for neptune.data.statistics."""
 
 import numpy as np
 
-from neptune.data.statistics import OnlineStats, clean
+from neptune.data.statistics import ChunkedStats, OnlineStats, clean
 
 
 def test_online_stats_typical() -> None:
@@ -49,6 +49,23 @@ def test_online_stats_precision() -> None:
     stats.update(values)
 
     assert np.isclose(stats.std, 0.005, rtol=0.05)
+
+
+def test_chunked_stats_typical() -> None:
+    r"""Determines if the statistics are the average of the mean and std of each chunk, mergeable."""
+
+    rng = np.random.default_rng(3)
+    chunks = [rng.normal(10.0 * k, 1.0 + k, size=500) for k in range(4)]
+
+    first, second = ChunkedStats(), ChunkedStats()
+    for chunk in chunks[:2]:
+        first.update(chunk)
+    for chunk in chunks[2:]:
+        second.update(chunk)
+    first.merge(second)
+
+    assert np.isclose(first.mean, np.mean([chunk.mean() for chunk in chunks]))
+    assert np.isclose(first.std, np.mean([chunk.std() for chunk in chunks]))
 
 
 def test_clean_typical() -> None:

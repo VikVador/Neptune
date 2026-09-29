@@ -27,7 +27,7 @@ def tiny_ds(monkeypatch: pytest.MonkeyPatch) -> NeptuneDataset:
 
     monkeypatch.setattr(
         "neptune.data.dataset.get_weights_stats",
-        lambda: (
+        lambda **kwargs: (
             torch.zeros(2, 1, 1),
             torch.ones(2, 1, 1),
             torch.zeros(3, 4, 1, 1),

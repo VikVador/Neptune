@@ -54,6 +54,12 @@ PATH_GRID_T = PATH_PATHS / "grid_T.txt"
 PATH_PTRC   = PATH_PATHS / "ptrc_T.txt"
 PATH_BTRC   = PATH_PATHS / "btrc_T.txt"
 
-PATH_STATS            = PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states.zarr"
 PATH_STATS_INCREMENTS = PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_increments.zarr"
 PATH_MASK             = PATH_DATASETS / "structure"  / "black_sea_phys_bio_hr001_mask.zarr"
+
+# Statistics over the whole period (global), or averaged over the statistics of each month or day
+PATH_STATS = {
+    "global"  : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states.zarr",
+    "monthly" : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states_monthly.zarr",
+    "daily"   : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states_daily.zarr",
+}

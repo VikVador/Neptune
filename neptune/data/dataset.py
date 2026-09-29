@@ -65,7 +65,10 @@ class NeptuneDataset(Dataset):
         self.standardized = standardized
         self.fill_with_nans = fill_with_nans
         self.mask_surface, self.mask_ocean = get_weights_mask()
-        self.mean_surface, self.std_surface, self.mean_ocean, self.std_ocean = get_weights_stats()
+        self.stats = get_weights_stats()
+
+        # Outliers are detected with the global statistics, whatever the standardization
+        self.stats_outliers = get_weights_stats(standardization="global")
 
         date_to_paths: dict[str, list[str]] = defaultdict(list)
         for paths in generate_paths().values():
@@ -113,21 +116,22 @@ class NeptuneDataset(Dataset):
 
         return x_s[:n], x_o[:n], x_s[n:], x_o[n:], dates
 
-    def _statistics(self, x_s: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        r"""Return the standardization statistics on the device and dtype of the states.
+    def _statistics(
+        self,
+        x_s: Tensor,
+        stats: tuple[Tensor, Tensor, Tensor, Tensor],
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        r"""Return statistics on the device and dtype of the states.
 
         Arguments:
-            x_s : Surface states (..., C_s, Y, X).
+            x_s   : Surface states (..., C_s, Y, X).
+            stats : Statistics (mean_s, std_s, mean_o, std_o), from get_weights_stats.
 
         Returns:
             mean_s, std_s : Surface statistics (C_s, 1, 1).
             mean_o, std_o : Ocean statistics (C_o, Z, 1, 1).
         """
-
-        return tuple(
-            t.to(x_s.device, dtype=x_s.dtype)
-            for t in (self.mean_surface, self.std_surface, self.mean_ocean, self.std_ocean)
-        )
+        return tuple(t.to(x_s.device, dtype=x_s.dtype) for t in stats)
 
     def standardize(self, x_s: Tensor, x_o: Tensor) -> tuple[Tensor, Tensor]:
         r"""Standardize surface and ocean states using precomputed statistics.
@@ -141,7 +145,7 @@ class NeptuneDataset(Dataset):
             x_o : Standardized ocean states, same shape.
         """
 
-        mean_s, std_s, mean_o, std_o = self._statistics(x_s)
+        mean_s, std_s, mean_o, std_o = self._statistics(x_s, self.stats)
 
         return (x_s - mean_s) / std_s, (x_o - mean_o) / std_o
 
@@ -157,7 +161,7 @@ class NeptuneDataset(Dataset):
             x_o : Ocean states in physical units, same shape.
         """
 
-        mean_s, std_s, mean_o, std_o = self._statistics(x_s)
+        mean_s, std_s, mean_o, std_o = self._statistics(x_s, self.stats)
 
         return x_s * std_s + mean_s, x_o * std_o + mean_o
 
@@ -167,7 +171,7 @@ class NeptuneDataset(Dataset):
         x_o: Tensor,
         n_std: float = 10.0,
     ) -> tuple[Tensor, Tensor]:
-        r"""Replace statistical outliers of surface and ocean states with the mean.
+        r"""Replace statistical outliers of surface and ocean states with their global mean.
 
         Arguments:
             x_s   : Surface states (..., C_s, Y, X).
@@ -179,7 +183,7 @@ class NeptuneDataset(Dataset):
             x_o : Ocean states, with outliers replaced by the mean.
         """
 
-        mean_s, std_s, mean_o, std_o = self._statistics(x_s)
+        mean_s, std_s, mean_o, std_o = self._statistics(x_s, self.stats_outliers)
         outliers_s = (x_s - mean_s).abs() > n_std * std_s
         outliers_o = (x_o - mean_o).abs() > n_std * std_o
 

@@ -25,15 +25,17 @@ from neptune.config import (
 )
 from neptune.data import (
     DATASET_REGION,
+    DATASET_VARIABLES,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     VARIABLES_CLIPPING,
+    VARIABLES_STANDARDIZATION,
     X,
     Y,
     Z,
 )
 
-# Increments standard deviation below which a variable-level is constant (see _constant_levels)
+# Increments standard deviation below which a variable-level is constant
 STD_CONSTANT = 1e-7
 
 
@@ -93,27 +95,58 @@ def _encode_sin_cos(values: Tensor) -> Tensor:
     return torch.stack([angle.sin(), angle.cos()])
 
 
-def _stats_tensors(path: Path) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    r"""Load the mean and standard deviation of every variable from a statistics zarr store.
+def _stats_array(path: Path, var: str) -> np.ndarray:
+    r"""Load the mean and standard deviation of one variable from a statistics zarr store.
 
     Arguments:
         path : Path to the statistics zarr store.
+        var  : Name of the variable.
+
+    Returns:
+        stats : Mean and standard deviation, (2,) for a surface and (2, Z) for an ocean variable.
+    """
+
+    with xr.open_zarr(path) as ds:
+        da = ds[var].sel(statistic=["mean", "std"])
+        depth = next((d for d in da.dims if d.startswith("depth")), None)
+
+        return (da if depth is None else da.isel({depth: DATASET_REGION["z"]})).values
+
+
+def _stats_paths(standardization: str | None = None) -> dict[str, Path]:
+    r"""Find the statistics store of the states of each variable, given its standardization.
+
+    Arguments:
+        standardization : Standardization of every variable ('global', 'monthly' or 'daily'), or
+                          None for the one of VARIABLES_STANDARDIZATION (else its default).
+
+    Returns:
+        paths : Path to the statistics zarr store of each variable.
+    """
+
+    default = VARIABLES_STANDARDIZATION["default"]
+
+    return {
+        var: PATH_STATS[standardization or VARIABLES_STANDARDIZATION.get(var, default)]
+        for var in DATASET_VARIABLES
+    }
+
+
+def _stats_tensors(paths: dict[str, Path]) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    r"""Load the mean and standard deviation of every variable, each from its own statistics store.
+
+    Arguments:
+        paths : Path to the statistics zarr store of each variable.
 
     Returns:
         mean_surface, std_surface : Surface statistics (C_s, 1, 1).
         mean_ocean, std_ocean     : Ocean statistics, per level (C_o, Z, 1, 1).
     """
 
-    with xr.open_zarr(path) as ds:
-        ds = ds.sel(statistic=["mean", "std"])
-        surface = [ds[var].values for var in DATASET_VARIABLES_SURFACE]
-        ocean = []
-        for var in DATASET_VARIABLES_OCEAN:
-            depth = next(d for d in ds[var].dims if d.startswith("depth"))
-            ocean.append(ds[var].isel({depth: DATASET_REGION["z"]}).values)
-
-    surface = torch.tensor(np.stack(surface), dtype=torch.float32)  # (C_s, 2)
-    ocean = torch.tensor(np.stack(ocean), dtype=torch.float32)  # (C_o, 2, Z)
+    surface = np.stack([_stats_array(paths[var], var) for var in DATASET_VARIABLES_SURFACE])
+    ocean = np.stack([_stats_array(paths[var], var) for var in DATASET_VARIABLES_OCEAN])
+    surface = torch.tensor(surface, dtype=torch.float32)  # (C_s, 2)
+    ocean = torch.tensor(ocean, dtype=torch.float32)  # (C_o, 2, Z)
 
     return (
         surface[:, 0, None, None],
@@ -154,7 +187,8 @@ def _constant_levels() -> tuple[Tensor, Tensor]:
         constant_ocean   : Whether each ocean variable is constant, per level (C_o, Z, 1, 1).
     """
 
-    _, std_surface, _, std_ocean = _stats_tensors(PATH_STATS_INCREMENTS)
+    paths = dict.fromkeys(DATASET_VARIABLES, PATH_STATS_INCREMENTS)
+    _, std_surface, _, std_ocean = _stats_tensors(paths)
 
     return std_surface <= STD_CONSTANT, std_ocean <= STD_CONSTANT
 
@@ -244,14 +278,16 @@ def get_weights_date(
 
 def get_weights_stats(
     *,
+    standardization: str | None = None,
     dim: int = 1,
     device: torch.device | str | None = None,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     r"""Load the standardization statistics of the surface and ocean variables.
 
     Arguments:
-        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
-        device : Target device ("cpu" or "cuda").
+        standardization : Standardization of every variable ('global', 'monthly', 'daily' or 'none')
+        dim             : Use 2 to add a leading batch dimension, 1 otherwise.
+        device          : Target device ("cpu" or "cuda").
 
     Returns:
         mean_surface : Mean of each surface variable (C_s, 1, 1).
@@ -259,7 +295,7 @@ def get_weights_stats(
         mean_ocean   : Mean of each ocean variable, per level (C_o, Z, 1, 1).
         std_ocean    : Standard deviation of each ocean variable, per level (C_o, Z, 1, 1).
     """
-    return tuple(_prepare(t, dim, device) for t in _stats_tensors(PATH_STATS))
+    return tuple(_prepare(t, dim, device) for t in _stats_tensors(_stats_paths(standardization)))
 
 
 def get_weights_increments(
@@ -285,8 +321,9 @@ def get_weights_increments(
         std_ocean    : Standard deviation of the increment of each ocean variable (C_o, Z, 1, 1).
     """
 
-    _, std_surface, _, std_ocean = _stats_tensors(PATH_STATS)
-    mean_inc_s, std_inc_s, mean_inc_o, std_inc_o = _stats_tensors(PATH_STATS_INCREMENTS)
+    _, std_surface, _, std_ocean = _stats_tensors(_stats_paths())
+    paths = dict.fromkeys(DATASET_VARIABLES, PATH_STATS_INCREMENTS)
+    mean_inc_s, std_inc_s, mean_inc_o, std_inc_o = _stats_tensors(paths)
 
     return (
         _prepare(mean_inc_s / std_surface, dim, device),
@@ -317,7 +354,7 @@ def get_weights_bounds(
         lower_ocean, upper_ocean     : Bounds of each ocean variable, per level (C_o, Z, 1, 1).
     """
 
-    mean_surface, std_surface, mean_ocean, std_ocean = _stats_tensors(PATH_STATS)
+    mean_surface, std_surface, mean_ocean, std_ocean = _stats_tensors(_stats_paths())
     constant_surface, constant_ocean = _constant_levels()
 
     lower_surface, upper_surface = _physical_bounds(DATASET_VARIABLES_SURFACE)

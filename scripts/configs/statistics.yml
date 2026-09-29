@@ -1,14 +1,14 @@
 Compute:
-    "jobs"      : [16]
-    "cpus"      : [16]
-    "ram"       : ["492GB"]
-    "time"      : ["06:00:00"]
+    "jobs"      : [940]
+    "cpus"      : [1]
+    "ram"       : ["6GB"]
+    "time"      : ["01:00:00"]
     "account"   : ["bsmfc"]
-    "partition" : ["large"]
+    "partition" : ["batch"]
 
 Aggregate:
     "cpus"      : [1]
-    "ram"       : ["492GB"]
+    "ram"       : ["16GB"]
     "time"      : ["00:30:00"]
     "account"   : ["bsmfc"]
-    "partition" : ["large"]
+    "partition" : ["batch"]
