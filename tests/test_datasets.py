@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from neptune.data import (
+    DATASET_CONDITIONING,
     DATASET_DATES_TRAINING,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
@@ -36,6 +37,11 @@ def tiny_ds(monkeypatch: pytest.MonkeyPatch) -> NeptuneDataset:
     )
 
     monkeypatch.setattr(
+        "neptune.data.dataset.get_weights_stats_conditioning",
+        lambda **kwargs: (torch.zeros(6, 1, 1), torch.ones(6, 1, 1)),
+    )
+
+    monkeypatch.setattr(
         "neptune.data.dataset.generate_paths",
         lambda: {"2000-01": [f"BS_1d_200001{d:02d}_grid_T.nc" for d in range(1, 11)]},
     )
@@ -54,7 +60,7 @@ def test_init_errors(tiny_ds: NeptuneDataset) -> None:
 
 
 def test_getitem_window(tiny_ds: NeptuneDataset, monkeypatch: pytest.MonkeyPatch) -> None:
-    r"""Determines if a window returns N previous and K future consecutive states, with their dates."""
+    r"""Determines if a window returns N previous and K future states, x_t conditioning, dates."""
 
     def _fake_preprocess(date: str) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Fake day filled with its day of the month."""
@@ -64,7 +70,8 @@ def test_getitem_window(tiny_ds: NeptuneDataset, monkeypatch: pytest.MonkeyPatch
         return torch.full((2, 8, 8), day), torch.full((3, 4, 8, 8), day)
 
     monkeypatch.setattr(tiny_ds, "preprocess", _fake_preprocess)
-    x_inp_s, x_inp_o, x_out_s, x_out_o, dates = tiny_ds[4]
+    monkeypatch.setattr(tiny_ds, "preprocess_conditioning", lambda date: _fake_preprocess(date)[0])
+    x_inp_s, x_inp_o, x_out_s, x_out_o, c_inp, dates = tiny_ds[4]
 
     assert len(tiny_ds) == 10 - (2 + 3) + 1
     assert x_inp_s.shape == (2, 2, 8, 8)
@@ -74,6 +81,8 @@ def test_getitem_window(tiny_ds: NeptuneDataset, monkeypatch: pytest.MonkeyPatch
     assert dates == [f"2000-01-{d:02d}" for d in range(5, 10)]
     assert x_inp_o[:, 0, 0, 0, 0].tolist() == [5.0, 6.0]
     assert x_out_s[:, 0, 0, 0].tolist() == [7.0, 8.0, 9.0]
+    assert c_inp.shape == (2, 8, 8)
+    assert (c_inp == 6.0).all()
 
 
 def test_standardize_outliers(tiny_ds: NeptuneDataset) -> None:
@@ -94,17 +103,19 @@ def test_standardize_outliers(tiny_ds: NeptuneDataset) -> None:
 
 @pytest.mark.integration
 def test_getitem_real() -> None:
-    r"""Determines if a real window has the expected shapes and dates, and zeros on land."""
+    r"""Determines if a real window has the expected shapes, dates, conditioning, zeros on land."""
 
     ds = NeptuneDataset(*DATASET_DATES_TRAINING, input_states=2, output_states=1)
-    x_inp_s, x_inp_o, x_out_s, x_out_o, dates = ds[0]
+    x_inp_s, x_inp_o, x_out_s, x_out_o, c_inp, dates = ds[0]
     mask_surface, mask_ocean = get_weights_mask()
 
     assert x_inp_s.shape == (2, len(DATASET_VARIABLES_SURFACE), Y, X)
     assert x_inp_o.shape == (2, len(DATASET_VARIABLES_OCEAN), Z, Y, X)
     assert x_out_s.shape == (1, len(DATASET_VARIABLES_SURFACE), Y, X)
     assert x_out_o.shape == (1, len(DATASET_VARIABLES_OCEAN), Z, Y, X)
+    assert c_inp.shape == (len(DATASET_CONDITIONING), Y, X)
     assert dates == ["1998-01-01", "1998-01-02", "1998-01-03"]
+    assert c_inp.isfinite().all()
     assert not x_inp_o.isnan().any()
     assert (x_inp_s * (1 - mask_surface) == 0).all()
     assert (x_inp_o * (1 - mask_ocean) == 0).all()

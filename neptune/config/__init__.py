@@ -18,7 +18,9 @@ __all__ = [
     "PATH_BTRC",
     "PATH_STATS",
     "PATH_STATS_INCREMENTS",
+    "PATH_STATS_CONDITIONING",
     "PATH_MASK",
+    "PATH_CONDITIONING",
 ]
 
 from pathlib import Path
@@ -57,9 +59,18 @@ PATH_BTRC   = PATH_PATHS / "btrc_T.txt"
 PATH_STATS_INCREMENTS = PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_increments.zarr"
 PATH_MASK             = PATH_DATASETS / "structure"  / "black_sea_phys_bio_hr001_mask.zarr"
 
+# Daily means of the ERA5 atmospheric forcing of NEMO, interpolated on its grid
+PATH_CONDITIONING = PATH_DATASETS / "conditioning" / "black_sea_era5_hr001_conditioning.zarr"
+
 # Statistics over the whole period (global), or averaged over the statistics of each month or day
 PATH_STATS = {
     "global"  : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states.zarr",
     "monthly" : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states_monthly.zarr",
     "daily"   : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states_daily.zarr",
+}
+
+PATH_STATS_CONDITIONING = {
+    "global"  : PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_conditioning.zarr",
+    "monthly" : PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_conditioning_monthly.zarr",
+    "daily"   : PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_conditioning_daily.zarr",
 }

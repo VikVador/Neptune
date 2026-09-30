@@ -18,6 +18,7 @@ from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from neptune.config import PATH_MODELS
+from neptune.data import DATASET_CONDITIONING
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_date, get_weights_loss
 from neptune.distributed import reduce_mean, setup_distributed
@@ -51,27 +52,35 @@ def _build_model(
         config    = OmegaConf.to_container(load_config(ckpt_path))
         model     = load(ckpt_path, FGN, device=str(device)).train()
     else:
-        config = config_model
+        # Conditioning | Date (sin, cos) of the surface and ocean, and ERA5 of the surface only
+        config = {**config_model, "cond_channels_surface": 2 + len(DATASET_CONDITIONING)}
         model  = FGN(**config).to(device)
 
     return model, config
 
 
-def _conditioning(dates: Sequence[str], device: torch.device) -> tuple[Tensor, Tensor]:
-    r"""Encode the dates of a batch as the conditioning of the FGN.
+def _conditioning(
+    dates  : Sequence[str],
+    c_inp  : Tensor,
+    device : torch.device,
+) -> tuple[Tensor, Tensor]:
+    r"""Build the conditioning of the FGN, from the last input state x_t of each sample.
 
     Arguments:
-        dates  : Date strings 'YYYY-MM-DD' of the forecasted states (B,).
+        dates  : Date strings 'YYYY-MM-DD' of the last input states (B,).
+        c_inp  : ERA5 conditioning of the last input states, from NeptuneDataset (B, C_c, Y, X).
         device : Target device.
 
     Returns:
-        cond_s : Surface conditioning (B, 2, Y, X).
-        cond_o : Ocean conditioning (B, 2, Z, Y, X).
+        cond_s : Surface conditioning, encoded date and ERA5 (B, 2 + C_c, Y, X).
+        cond_o : Ocean conditioning, encoded date (B, 2, Z, Y, X).
     """
 
     encodings = [get_weights_date(date, dim=2, device=device) for date in dates]
+    date_s    = torch.cat([date_s for date_s, _ in encodings])
+    date_o    = torch.cat([date_o for _, date_o in encodings])
 
-    return torch.cat([cond_s for cond_s, _ in encodings]), torch.cat([cond_o for _, cond_o in encodings])
+    return torch.cat([date_s, c_inp.to(device)], dim=1), date_o
 
 
 def forward_loss(
@@ -85,7 +94,7 @@ def forward_loss(
 
     Arguments:
         model   : FGN, possibly wrapped by DDP.
-        batch   : Window of previous and future states, with their dates, from NeptuneDataset.
+        batch   : Window of previous and future states, with the conditioning and dates, from NeptuneDataset.
         members : Number of ensemble members E.
         weights : Loss weights of the surface and ocean variables, from get_weights_loss.
         device  : Target device.
@@ -95,11 +104,11 @@ def forward_loss(
         loss_ocean   : Weighted CRPS of the ocean variables.
     """
 
-    x_inp_s, x_inp_o, x_out_s, x_out_o, dates = batch
+    x_inp_s, x_inp_o, x_out_s, x_out_o, c_inp, dates = batch
     fgn = model.module if hasattr(model, "module") else model
 
-    # The collate transposes the dates, dates[N] holds the date of the next state of each sample
-    cond_s, cond_o   = _conditioning(dates[x_inp_s.shape[1]], device)
+    # The collate transposes the dates, dates[N - 1] holds the date of the last input state of each sample
+    cond_s, cond_o   = _conditioning(dates[x_inp_s.shape[1] - 1], c_inp, device)
     x_inp_s, x_inp_o = x_inp_s.to(device), x_inp_o.to(device)
     x_s, x_o         = x_out_s[:, 0].to(device), x_out_o[:, 0].to(device)
 

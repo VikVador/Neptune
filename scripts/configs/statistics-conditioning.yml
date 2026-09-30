@@ -1,0 +1,14 @@
+Compute:
+    "jobs"      : [4]
+    "cpus"      : [8]
+    "ram"       : ["32GB"]
+    "time"      : ["01:00:00"]
+    "account"   : ["bsmfc"]
+    "partition" : ["debug"]
+
+Aggregate:
+    "cpus"      : [1]
+    "ram"       : ["8GB"]
+    "time"      : ["00:30:00"]
+    "account"   : ["bsmfc"]
+    "partition" : ["debug"]

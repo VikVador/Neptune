@@ -43,7 +43,7 @@ def compute_increments_statistics(path_output: Path, samples: int, num_workers: 
     stats_surface = [OnlineStats() for _ in DATASET_VARIABLES_SURFACE]
     stats_ocean   = [[OnlineStats() for _ in range(Z)] for _ in DATASET_VARIABLES_OCEAN]
 
-    for x_inp_s, x_inp_o, x_out_s, x_out_o, _ in tqdm(dataloader, desc="Increments", mininterval=10):
+    for x_inp_s, x_inp_o, x_out_s, x_out_o, _, _ in tqdm(dataloader, desc="Increments", mininterval=10):
         dx_s = (x_out_s - x_inp_s)[0].numpy()
         dx_o = (x_out_o - x_inp_o)[0].numpy()
 

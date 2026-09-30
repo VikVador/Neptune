@@ -38,30 +38,9 @@ def generate_paths() -> dict[str, Sequence[str]]:
     Returns:
         paths : Paths of every physics and biogeochemistry file, keyed by month 'YYYY-MM'.
     """
+    grids = [
+        ast.literal_eval(path.read_text())
+        for path in (PATH_GRID_U, PATH_GRID_V, PATH_GRID_W, PATH_GRID_T, PATH_PTRC, PATH_BTRC)
+    ]
 
-    with open(PATH_GRID_U) as file:
-        physics_data_U = ast.literal_eval(file.read())
-    with open(PATH_GRID_V) as file:
-        physics_data_V = ast.literal_eval(file.read())
-    with open(PATH_GRID_W) as file:
-        physics_data_W = ast.literal_eval(file.read())
-    with open(PATH_GRID_T) as file:
-        physics_data_T = ast.literal_eval(file.read())
-    with open(PATH_BTRC) as file:
-        biogeochemistry_data_btrc = ast.literal_eval(file.read())
-    with open(PATH_PTRC) as file:
-        biogeochemistry_data_ptrc = ast.literal_eval(file.read())
-
-    paths = {}
-
-    for date_month in physics_data_T.keys():
-        paths[date_month] = (
-            physics_data_U[date_month]
-            + physics_data_V[date_month]
-            + physics_data_W[date_month]
-            + physics_data_T[date_month]
-            + biogeochemistry_data_ptrc[date_month]
-            + biogeochemistry_data_btrc[date_month]
-        )
-
-    return paths
+    return {month: [path for grid in grids for path in grid[month]] for month in grids[3]}
