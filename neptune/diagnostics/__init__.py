@@ -14,7 +14,6 @@ import matplotlib.cm as plt_cm
 # fmt: off
 #
 TRANSLATIONS = {
-    "windsp"   : "Wind Speed Module",
     "tauuo"    : "Downward X-Stress",
     "tauvo"    : "Downward Y-Stress",
     "ssh"      : "Sea Surface Height",
@@ -31,7 +30,6 @@ TRANSLATIONS = {
 }
 
 UNITS = {
-    "windsp"   : "[m/s]",
     "tauuo"    : "[N/m^2]",
     "tauvo"    : "[N/m^2]",
     "ssh"      : "[m]",
@@ -53,7 +51,6 @@ CMAPS_METRICS = {
 }
 
 CMAPS_LINE = {
-    "windsp"   : "#ffa669",
     "tauuo"    : "#cfa155",
     "tauvo"    : "#8fd3c8",
     "ssh"      : "#9C7AFF",
@@ -70,7 +67,6 @@ CMAPS_LINE = {
 }
 
 CMAPS_FIELD = {
-    "windsp"   : plt_cm.copper_r,
     "tauuo"    : plt_cm.BrBG_r,
     "tauvo"    : plt_cm.BrBG_r,
     "ssh"      : cmo_cm.diff,

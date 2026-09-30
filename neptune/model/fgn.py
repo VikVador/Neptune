@@ -286,8 +286,8 @@ class FGN(nn.Module):
         Arguments:
             x_inp_s  : Previous surface states (B, N, C_s, Y, X).
             x_inp_o  : Previous ocean states (B, N, C_o, Z, Y, X).
-            cond_s   : Surface conditioning of each forecasted day (B, K, C_cs, Y, X).
-            cond_o   : Ocean conditioning of each forecasted day (B, K, C_co, Z, Y, X).
+            cond_s   : Surface conditioning of the last input state of each step (B, K, C_cs, Y, X).
+            cond_o   : Ocean conditioning of the last input state of each step (B, K, C_co, Z, Y, X).
             members  : Number of ensemble members E.
             progress : Whether to display a progress bar over the forecasted days.
 
