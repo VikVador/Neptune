@@ -14,30 +14,30 @@ Cluster:
 
 State:
     "saving"          : [true]
-    "checkpoint_name" : ["FGN_in2_lc512_cf60_tk2304_hc1024_hb16__DBE0"]
+    "checkpoint_name" : [null]
 
 Training:
     "members"             : [2]
     "batch_size_per_step" : [128]
     "batch_size_per_gpu"  : [1]
-    "steps_update"        : [128000]
-    "steps_logging"       : [4]
+    "steps_update"        : [51200]
+    "steps_logging"       : [16]
     "steps_validation"    : [512]
-    "batches_validation"  : [128]
+    "batches_validation"  : [512]
     "num_workers"         : [4]
     "prefetch_factor"     : [1]
-    "learning_rate_start" : [0.00001]
-    "learning_rate_peak"  : [0.00070]
+    "learning_rate_start" : [0.00002]
+    "learning_rate_peak"  : [0.00080]
     "learning_rate_end"   : [0.00001]
-    "warmup_steps"        : [512]
+    "warmup_steps"        : [1024]
 
 Model:
     "input_states" : [2]
-    "lat_channels" : [512]
+    "lat_channels" : [256]
     "mod_features" : [32]
 
     "config_surface":
-        "hid_channels"  : [[16, 32, 64, 128, 128]]
+        "hid_channels"  : [[32, 64, 128, 128, 256]]
         "hid_blocks"    : [[3, 3, 3, 3, 3]]
         "hid_groups"    : [[0, 0, 0, 0, 0]]
         "kernel_size"   : [3]
@@ -47,7 +47,7 @@ Model:
         "checkpointing" : [true]
 
     "config_ocean":
-        "hid_channels"  : [[32, 64, 128, 256, 256]]
+        "hid_channels"  : [[32, 64, 128, 128, 256]]
         "hid_blocks"    : [[3, 3, 3, 3, 3]]
         "hid_groups"    : [[0, 0, 0, 0, 0]]
         "kernel_size"   : [3]

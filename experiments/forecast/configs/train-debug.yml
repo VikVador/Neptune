@@ -1,6 +1,6 @@
 WandB:
     "entity"  : ["neptuneAI"]
-    "project" : ["neptune-training-debug"]
+    "project" : ["neptune-training-forecast-debug"]
     "mode"    : ["disabled"]
 
 Cluster:
