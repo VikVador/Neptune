@@ -3,6 +3,7 @@ r"""Information about our dataset"""
 __all__ = [
     "VARIABLES_CLIPPING",
     "VARIABLES_STANDARDIZATION",
+    "VARIABLES_CONDITIONING_STANDARDIZATION",
     "DATASET_DATES_TRAINING",
     "DATASET_DATES_VALIDATION",
     "DATASET_DATES_TEST",
@@ -10,6 +11,7 @@ __all__ = [
     "DATASET_VARIABLES_SURFACE",
     "DATASET_VARIABLES_OCEAN",
     "DATASET_VARIABLES",
+    "DATASET_CONDITIONING",
     "Z",
     "X",
     "Y",
@@ -20,7 +22,6 @@ __all__ = [
 # ----- Preprocessing
 #
 VARIABLES_CLIPPING = {
-    "windsp":   (0, None),
     "vosaline": (0, None),
     "CHL":      (0, None),
     "DOX":      (0, None),
@@ -31,7 +32,6 @@ VARIABLES_CLIPPING = {
 }
 
 VARIABLES_STANDARDIZATION = {
-    "windsp"   : "daily",
     "tauuo"    : "daily",
     "tauvo"    : "daily",
     "ssh"      : "daily",
@@ -48,6 +48,16 @@ VARIABLES_STANDARDIZATION = {
     "default"  : "daily",
 }
 
+VARIABLES_CONDITIONING_STANDARDIZATION = {
+    "t2m"      : "daily",
+    "msdwswrf" : "daily",
+    "msdwlwrf" : "daily",
+    "u10"      : "daily",
+    "v10"      : "daily",
+    "si10"     : "daily",
+    "default"  : "daily",
+}
+
 # ----- Black Sea
 #
 DATASET_DATES_TRAINING   = ("1998-01-01", "2017-12-31")
@@ -60,8 +70,16 @@ DATASET_REGION = {
     "z": slice(0, 48),
 }
 
+DATASET_CONDITIONING = [
+    "t2m",
+    "msdwswrf",
+    "msdwlwrf",
+    "u10",
+    "v10",
+    "si10",
+]
+
 DATASET_VARIABLES_SURFACE = [
-    "windsp",
     "tauuo",
     "tauvo",
     "ssh",

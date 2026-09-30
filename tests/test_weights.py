@@ -6,6 +6,7 @@ import xarray as xr
 
 from neptune.config import PATH_STATS_INCREMENTS
 from neptune.data import (
+    DATASET_CONDITIONING,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     X,
@@ -22,6 +23,7 @@ from neptune.data.weights import (
     get_weights_mask,
     get_weights_mesh,
     get_weights_stats,
+    get_weights_stats_conditioning,
 )
 
 C_S = len(DATASET_VARIABLES_SURFACE)
@@ -90,6 +92,19 @@ def test_get_weights_stats_typical() -> None:
 
 
 @pytest.mark.integration
+def test_get_weights_stats_conditioning_typical() -> None:
+    r"""Determines if the conditioning statistics broadcast over the surface, with positive std."""
+
+    mean, std = get_weights_stats_conditioning()
+    _, std_global = get_weights_stats_conditioning(standardization="global")
+    _, std_daily = get_weights_stats_conditioning(standardization="daily")
+
+    assert mean.shape == std.shape == (len(DATASET_CONDITIONING), 1, 1)
+    assert (std > 0).all()
+    assert (std_daily <= std_global).all()
+
+
+@pytest.mark.integration
 def test_get_weights_increments_typical() -> None:
     r"""Determines if the increments statistics are the physical ones divided by the states std."""
 
@@ -97,13 +112,13 @@ def test_get_weights_increments_typical() -> None:
     _, std_inc_surface, _, std_inc_ocean = get_weights_increments()
     physical = xr.open_zarr(PATH_STATS_INCREMENTS)
 
-    i_windsp = DATASET_VARIABLES_SURFACE.index("windsp")
+    i_tauuo = DATASET_VARIABLES_SURFACE.index("tauuo")
     i_votemper = DATASET_VARIABLES_OCEAN.index("votemper")
-    windsp = torch.tensor(float(physical["windsp"].sel(statistic="std")))
+    tauuo = torch.tensor(float(physical["tauuo"].sel(statistic="std")))
     votemper = torch.tensor(physical["votemper"].sel(statistic="std").values, dtype=torch.float32)
 
     assert std_inc_ocean.shape == (C_O, Z, 1, 1)
-    assert torch.isclose(std_inc_surface[i_windsp] * std_surface[i_windsp], windsp)
+    assert torch.isclose(std_inc_surface[i_tauuo] * std_surface[i_tauuo], tauuo)
     assert torch.allclose(
         std_inc_ocean[i_votemper] * std_ocean[i_votemper], votemper[:, None, None]
     )
@@ -113,15 +128,16 @@ def test_get_weights_increments_typical() -> None:
 def test_get_weights_bounds_typical() -> None:
     r"""Determines if the bounds map 0 to the positive variables and pin constant levels to 0."""
 
-    mean_surface, std_surface, _, _ = get_weights_stats()
+    _, _, mean_ocean, std_ocean = get_weights_stats()
     lower_surface, upper_surface, lower_ocean, upper_ocean = get_weights_bounds()
     _, constant_ocean = _constant_levels()
 
-    i_windsp = DATASET_VARIABLES_SURFACE.index("windsp")
-    windsp = lower_surface[i_windsp] * std_surface[i_windsp] + mean_surface[i_windsp]
+    i_vosaline = DATASET_VARIABLES_OCEAN.index("vosaline")
+    vosaline = lower_ocean[i_vosaline] * std_ocean[i_vosaline] + mean_ocean[i_vosaline]
+    vosaline = vosaline[~constant_ocean[i_vosaline]]
 
-    assert torch.allclose(windsp, torch.zeros(1, 1), atol=1e-5)
-    assert (upper_surface == float("inf")).all()
+    assert torch.allclose(vosaline, torch.zeros_like(vosaline), atol=1e-3)
+    assert (lower_surface == -float("inf")).all() and (upper_surface == float("inf")).all()
     assert constant_ocean[DATASET_VARIABLES_OCEAN.index("DOX")].any()
     assert (lower_ocean[constant_ocean] == 0).all() and (upper_ocean[constant_ocean] == 0).all()
 

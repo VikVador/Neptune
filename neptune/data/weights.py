@@ -5,6 +5,7 @@ __all__ = [
     "get_weights_mesh",
     "get_weights_date",
     "get_weights_stats",
+    "get_weights_stats_conditioning",
     "get_weights_increments",
     "get_weights_bounds",
     "get_weights_loss",
@@ -21,14 +22,17 @@ from torch import Tensor
 from neptune.config import (
     PATH_MASK,
     PATH_STATS,
+    PATH_STATS_CONDITIONING,
     PATH_STATS_INCREMENTS,
 )
 from neptune.data import (
+    DATASET_CONDITIONING,
     DATASET_REGION,
     DATASET_VARIABLES,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     VARIABLES_CLIPPING,
+    VARIABLES_CONDITIONING_STANDARDIZATION,
     VARIABLES_STANDARDIZATION,
     X,
     Y,
@@ -113,23 +117,28 @@ def _stats_array(path: Path, var: str) -> np.ndarray:
         return (da if depth is None else da.isel({depth: DATASET_REGION["z"]})).values
 
 
-def _stats_paths(standardization: str | None = None) -> dict[str, Path]:
-    r"""Find the statistics store of the states of each variable, given its standardization.
+def _stats_paths(
+    standardization: str | None = None,
+    conditioning: bool = False,
+) -> dict[str, Path]:
+    r"""Find the statistics store of each variable, given its standardization.
 
     Arguments:
-        standardization : Standardization of every variable ('global', 'monthly' or 'daily'), or
-                          None for the one of VARIABLES_STANDARDIZATION (else its default).
+        standardization : Standardization of every variable ('global', 'monthly' or 'daily').
+        conditioning    : Whether to find the stores of the conditioning variables instead.
 
     Returns:
         paths : Path to the statistics zarr store of each variable.
     """
 
-    default = VARIABLES_STANDARDIZATION["default"]
+    variables, standardizations, paths = (
+        (DATASET_CONDITIONING, VARIABLES_CONDITIONING_STANDARDIZATION, PATH_STATS_CONDITIONING)
+        if conditioning
+        else (DATASET_VARIABLES, VARIABLES_STANDARDIZATION, PATH_STATS)
+    )
+    default = standardizations["default"]
 
-    return {
-        var: PATH_STATS[standardization or VARIABLES_STANDARDIZATION.get(var, default)]
-        for var in DATASET_VARIABLES
-    }
+    return {var: paths[standardization or standardizations.get(var, default)] for var in variables}
 
 
 def _stats_tensors(paths: dict[str, Path]) -> tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -176,11 +185,6 @@ def _physical_bounds(variables: list[str]) -> tuple[Tensor, Tensor]:
 
 def _constant_levels() -> tuple[Tensor, Tensor]:
     r"""Find the variable-levels whose values never change from one day to the next.
-
-    Context:
-        These are the levels where a variable is physically zero, e.g. oxygen and nitrate in the
-        anoxic zone, light and chlorophyll at depth. A variable-level is constant when the standard
-        deviation of its daily increments is below a constant (pre-defined) threshold.
 
     Returns:
         constant_surface : Whether each surface variable is constant (C_s, 1, 1).
@@ -298,6 +302,32 @@ def get_weights_stats(
     return tuple(_prepare(t, dim, device) for t in _stats_tensors(_stats_paths(standardization)))
 
 
+def get_weights_stats_conditioning(
+    *,
+    standardization: str | None = None,
+    dim: int = 1,
+    device: torch.device | str | None = None,
+) -> tuple[Tensor, Tensor]:
+    r"""Load the standardization statistics of the conditioning variables.
+
+    Arguments:
+        standardization : Standardization of every variable ('global', 'monthly' or 'daily' or 'none')
+        dim             : Use 2 to add a leading batch dimension, 1 otherwise.
+        device          : Target device ("cpu" or "cuda").
+
+    Returns:
+        mean_conditioning : Mean of each conditioning variable (C_c, 1, 1).
+        std_conditioning  : Standard deviation of each conditioning variable (C_c, 1, 1).
+    """
+
+    paths = _stats_paths(standardization, conditioning=True)
+    stats = np.stack([_stats_array(paths[var], var) for var in DATASET_CONDITIONING])
+    stats = torch.tensor(stats, dtype=torch.float32)  # (C_c, 2)
+    mean, std = stats[:, 0, None, None], stats[:, 1, None, None]
+
+    return _prepare(mean, dim, device), _prepare(std, dim, device)
+
+
 def get_weights_increments(
     *,
     dim: int = 1,
@@ -339,11 +369,6 @@ def get_weights_bounds(
     device: torch.device | str | None = None,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     r"""Compute the physical bounds of the variables, per level and in standardized units.
-
-    Context:
-        During a rollout, each forecast is fed back as input. A single unphysical value, e.g. a slightly
-        negative concentration due to numerical errors, falls outside the training distribution and the
-        rollout can then quickly diverge, as observed in WeatherNext 3.
 
     Arguments:
         dim    : Use 2 to add a leading batch dimension, 1 otherwise.

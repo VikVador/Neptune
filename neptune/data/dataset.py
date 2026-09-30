@@ -13,7 +13,9 @@ from collections import defaultdict
 from torch import Tensor
 from torch.utils.data import Dataset
 
+from neptune.config import PATH_CONDITIONING
 from neptune.data import (
+    DATASET_CONDITIONING,
     DATASET_DATES_TEST,
     DATASET_DATES_TRAINING,
     DATASET_DATES_VALIDATION,
@@ -30,11 +32,12 @@ from neptune.data.tools import (
 from neptune.data.weights import (
     get_weights_mask,
     get_weights_stats,
+    get_weights_stats_conditioning,
 )
 
 
 class NeptuneDataset(Dataset):
-    r"""Creates a Neptune dataset of consecutive (surface, ocean) states.
+    r"""Creates a Neptune dataset of consecutive (surface, ocean) states, with their conditioning.
 
     Arguments:
         date_start     : Start date of the date range (format: 'YYYY-MM-DD').
@@ -66,6 +69,7 @@ class NeptuneDataset(Dataset):
         self.fill_with_nans = fill_with_nans
         self.mask_surface, self.mask_ocean = get_weights_mask()
         self.stats = get_weights_stats()
+        self.stats_conditioning = get_weights_stats_conditioning()
 
         # Outliers are detected with the global statistics, whatever the standardization
         self.stats_outliers = get_weights_stats(standardization="global")
@@ -92,8 +96,8 @@ class NeptuneDataset(Dataset):
         r"""Return the number of windows of consecutive states in the date range."""
         return len(self.dates) - self.input_states - self.output_states + 1
 
-    def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor, Tensor, list[str]]:
-        r"""Return a window of N previous and K future states, with their dates.
+    def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, list[str]]:
+        r"""Return a window of N previous and K future states, with the conditioning and the dates.
 
         Arguments:
             idx : Index of the window.
@@ -103,6 +107,7 @@ class NeptuneDataset(Dataset):
             x_inp_o : Previous ocean states (N, C_o, Z, Y, X).
             x_out_s : Future surface states (K, C_s, Y, X).
             x_out_o : Future ocean states (K, C_o, Z, Y, X).
+            c_inp   : Conditioning of the last previous state only (C_c, Y, X).
             dates   : Date strings 'YYYY-MM-DD' of the window (N + K).
         """
 
@@ -113,8 +118,9 @@ class NeptuneDataset(Dataset):
         x_o = torch.stack([x_o for _, x_o in states])
 
         n = self.input_states
+        c_inp = self.preprocess_conditioning(dates[n - 1])
 
-        return x_s[:n], x_o[:n], x_s[n:], x_o[n:], dates
+        return x_s[:n], x_o[:n], x_s[n:], x_o[n:], c_inp, dates
 
     def _statistics(
         self,
@@ -256,6 +262,28 @@ class NeptuneDataset(Dataset):
             x_s, x_o = self.standardize(x_s, x_o)
 
         return self._fill_land(x_s, self.mask_surface), self._fill_land(x_o, self.mask_ocean)
+
+    def preprocess_conditioning(self, date: str) -> Tensor:
+        r"""Load and preprocess the atmospheric conditioning of a single day.
+
+        Arguments:
+            date : Date string 'YYYY-MM-DD'.
+
+        Returns:
+            c : Conditioning (C_c, Y, X).
+        """
+
+        with xr.open_zarr(PATH_CONDITIONING, chunks=None) as ds:
+            c = ds[DATASET_CONDITIONING].sel(time=date)
+            c = c.isel(x=DATASET_REGION["x"], y=DATASET_REGION["y"]).to_array().values
+
+        c = torch.as_tensor(c, dtype=torch.float32)
+
+        if self.standardized:
+            mean_c, std_c = self.stats_conditioning
+            c = (c - mean_c) / std_c
+
+        return c
 
 
 def get_datasets(
