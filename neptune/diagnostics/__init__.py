@@ -1,19 +1,54 @@
 r"""Global constants for diagnostics."""
 
 __all__ = [
-    "TRANSLATIONS",
+    "TRANSLATIONS_VARS",
+    "TRANSLATIONS_METRICS",
     "UNITS",
-    "CMAPS_LINE",
-    "CMAPS_FIELD",
-    "CMAPS_METRICS",
+    "CMAPS_LINE_MODELS",
+    "CMAPS_LINE_VARS",
+    "CMAPS_SPATIAL_METRICS",
+    "CMAPS_SPATIAL_VARS",
+    "SEASONS",
+    "SPLITS",
+    "FIG_PROPERTIES",
 ]
 
 import cmocean.cm as cmo_cm
 import matplotlib.cm as plt_cm
 
+from neptune.data import DATASET_DATES_TEST, DATASET_DATES_VALIDATION
+
 # fmt: off
 #
-TRANSLATIONS = {
+SPLITS = {
+    "validation" : DATASET_DATES_VALIDATION,
+    "test"       : DATASET_DATES_TEST,
+}
+
+SEASONS = {
+    "winter" : (1,   2, 3),
+    "spring" : (4,   5, 6),
+    "summer" : (7,   8, 9),
+    "autumn" : (10, 11, 12),
+}
+
+FIG_PROPERTIES = {
+    "figsize"                   : (14, 18),
+    "fs_title"                  : 12,
+    "fs_x_label"                : 12,
+    "fs_y_label"                : 12,
+    "fs_x_tick"                 : 11,
+    "fs_y_tick"                 : 11,
+    "fs_sup_x_label"            : 14,
+    "fs_sup_y_label"            : 14,
+    "line_width"                : 2,
+    "line_opacity"              : 1,
+    "line_opacity_fill_between" : 0.25,
+    "quantile_vmin"             : 0.02,
+    "quantile_vmax"             : 0.98,
+}
+
+TRANSLATIONS_VARS = {
     "tauuo"    : "Downward X-Stress",
     "tauvo"    : "Downward Y-Stress",
     "ssh"      : "Sea Surface Height",
@@ -27,6 +62,12 @@ TRANSLATIONS = {
     "PHO"      : "Phosphate",
     "SIO"      : "Silicic Acid",
     "NOS"      : "Nitrate",
+}
+
+TRANSLATIONS_METRICS = {
+    "skill"  : "Skill",
+    "spread" : "Spread",
+    "ratio"  : "Spread-Skill Ratio",
 }
 
 UNITS = {
@@ -45,12 +86,13 @@ UNITS = {
     "NOS"      : "[mmol/m^3]",
 }
 
-CMAPS_METRICS = {
-    "rmse" : plt_cm.magma,
-    "std"  : plt_cm.cividis,
+CMAPS_LINE_MODELS = {
+    "forecast"    : "#4d68d7",
+    "persistence" : "#808080",
+    "climatology" : "#E67E22",
 }
 
-CMAPS_LINE = {
+CMAPS_LINE_VARS = {
     "tauuo"    : "#cfa155",
     "tauvo"    : "#8fd3c8",
     "ssh"      : "#9C7AFF",
@@ -66,7 +108,13 @@ CMAPS_LINE = {
     "NOS"      : "#262e47",
 }
 
-CMAPS_FIELD = {
+CMAPS_SPATIAL_METRICS = {
+    "skill"  : plt_cm.magma,
+    "spread" : plt_cm.cividis,
+    "ratio"  : plt_cm.RdBu_r,
+}
+
+CMAPS_SPATIAL_VARS = {
     "tauuo"    : plt_cm.BrBG_r,
     "tauvo"    : plt_cm.BrBG_r,
     "ssh"      : cmo_cm.diff,
