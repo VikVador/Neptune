@@ -10,6 +10,8 @@ __all__ = [
     "PATH_DATASETS",
     "PATH_MODELS",
     "PATH_PATHS",
+    "PATH_DIAGNOSTICS",
+    "PATH_FIGURES",
     "PATH_GRID_U",
     "PATH_GRID_V",
     "PATH_GRID_W",
@@ -21,6 +23,7 @@ __all__ = [
     "PATH_STATS_CONDITIONING",
     "PATH_MASK",
     "PATH_CONDITIONING",
+    "PATH_CLIMATOLOGY",
 ]
 
 from pathlib import Path
@@ -42,10 +45,11 @@ PATH_NEP_PROJECT = PATH_MAIN_PROJECT / "neptune"
 PATH_NEP_SCRATCH = PATH_MAIN_SCRATCH / "neptune"
 
 # ----- Subfolders
-PATH_DATASETS = PATH_NEP_PROJECT / "datasets"
-PATH_MODELS   = PATH_NEP_PROJECT / "models"
-PATH_PATHS    = PATH_NEP_PROJECT / "paths"
-
+PATH_DATASETS    = PATH_NEP_PROJECT / "datasets"
+PATH_MODELS      = PATH_NEP_PROJECT / "models"
+PATH_PATHS       = PATH_NEP_PROJECT / "paths"
+PATH_DIAGNOSTICS = PATH_NEP_SCRATCH / "diagnostics"
+PATH_FIGURES     = Path(__file__).parents[2] / "experiments" / "forecast" / "figures"
 
 # ----- Others
 #
@@ -61,6 +65,9 @@ PATH_MASK             = PATH_DATASETS / "structure"  / "black_sea_phys_bio_hr001
 
 # Daily means of the ERA5 atmospheric forcing of NEMO, interpolated on its grid
 PATH_CONDITIONING = PATH_DATASETS / "conditioning" / "black_sea_era5_hr001_conditioning.zarr"
+
+# Daily climatology of the states over the training period
+PATH_CLIMATOLOGY = PATH_DATASETS / "climatology" / "black_sea_phys_bio_hr001_climatology.zarr"
 
 # Statistics over the whole period (global), or averaged over the statistics of each month or day
 PATH_STATS = {
