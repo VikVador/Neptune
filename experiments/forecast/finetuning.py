@@ -237,7 +237,7 @@ def training(
     # Loss | CRPS of the normalized increments, averaged over the non-constant variable-levels and weighted over the days
     weights = (torch.tensor(rollout_weights, device=device), *get_weights_loss(device=device))
 
-    # Noise | Added to the ERA5 conditioning of each step during training, the validation using the true forcing
+    # Noise | Added to the ERA5 conditioning of each step, during the training and the validation
     noise = noise_forcing_levels if noise_forcing else [0.0] * rollout_days
 
     # Model | Masks, meshes and statistics are identical on every process, no need to broadcast them, and the
@@ -334,7 +334,7 @@ def training(
             loss_validation = torch.zeros(2)
             with torch.no_grad():
                 for _ in range(batches_validation):
-                    loss_surface, loss_ocean = forward_loss(model, next(dataloader_validation), members, weights, [0.0] * rollout_days, device)
+                    loss_surface, loss_ocean = forward_loss(model, next(dataloader_validation), members, weights, noise, device)
                     loss_validation         += torch.tensor([loss_surface.item(), loss_ocean.item()]) / batches_validation
             model.train()
 
