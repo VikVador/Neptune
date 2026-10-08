@@ -2,7 +2,7 @@ r"""Tests for neptune.loss."""
 
 import torch
 
-from neptune.loss import loss_crps
+from neptune.loss import loss_crps, loss_crps_rollout
 
 
 def test_loss_crps_typical() -> None:
@@ -56,3 +56,21 @@ def test_loss_crps_gradient() -> None:
     assert torch.isfinite(x_pred_s.grad).all()
     assert torch.isfinite(x_pred_o.grad).all()
     assert (x_pred_s.grad[:, :, :, mask_surface[0] == 0] == 0).all()
+
+
+def test_loss_crps_rollout_typical() -> None:
+    r"""Determines if the rollout loss is the CRPS of each day, averaged with normalized weights."""
+
+    x_pred_s, x_pred_o = torch.randn(2, 2, 3, 3, 4, 4), torch.randn(2, 2, 3, 3, 2, 4, 4)
+    x_s, x_o = torch.randn(2, 3, 3, 4, 4), torch.randn(2, 3, 3, 2, 4, 4)
+    masks = torch.ones(1, 4, 4), torch.ones(1, 2, 4, 4)
+    days = [
+        loss_crps(x_pred_s[:, :, k], x_pred_o[:, :, k], x_s[:, k], x_o[:, k], *masks)
+        for k in range(3)
+    ]
+
+    first = loss_crps_rollout(x_pred_s, x_pred_o, x_s, x_o, *masks, torch.tensor([2.0, 0.0, 0.0]))
+    mean = loss_crps_rollout(x_pred_s, x_pred_o, x_s, x_o, *masks, torch.ones(3))
+
+    assert torch.allclose(torch.stack(first), torch.stack(days[0]))
+    assert torch.allclose(torch.stack(mean), torch.tensor(days).mean(dim=0))
