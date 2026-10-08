@@ -14,7 +14,7 @@ Cluster:
 
 State:
     "saving"          : [true]
-    "checkpoint_name" : [null]
+    "checkpoint_name" : ["FGN_in2_lc256_cf121_tk2304_hc1024_hb16__4827"]
 
 Training:
     "members"              : [2]
