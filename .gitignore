@@ -1,31 +1,22 @@
-# Garbage
+# Project
 *.DS_Store
+*.sh
 *.zarr
+.dawgz/
+cluster/*
+experiments/forecast/.dawgz/
+experiments/forecast/figures/
+experiments/forecast/wandb/
 logs/*.err
 logs/*.log
-
-# Scripts
-*.sh
+notebooks/*.ipynb
+scripts/.dawgz/
+scripts/wandb/
+wandb/
 
 # Claude
 CLAUDE.md
 .claude/*
-
-# Notebooks
-notebooks/*.ipynb
-
-# Clusters
-cluster/*
-
-# Weight and biases & Dawgz
-wandb/
-.dawgz/
-scripts/wandb/
-scripts/.dawgz/
-experiments/forecast/wandb/
-experiments/forecast/.dawgz/
-experiments/forecast/**/*.png
-experiments/forecast/**/*.pdf
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
