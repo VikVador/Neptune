@@ -107,7 +107,7 @@ class NeptuneDataset(Dataset):
             x_inp_o : Previous ocean states (N, C_o, Z, Y, X).
             x_out_s : Future surface states (K, C_s, Y, X).
             x_out_o : Future ocean states (K, C_o, Z, Y, X).
-            c_inp   : Conditioning of the last previous state only (C_c, Y, X).
+            c_inp   : Conditioning of the last input state of each forecasted step.
             dates   : Date strings 'YYYY-MM-DD' of the window (N + K).
         """
 
@@ -117,10 +117,10 @@ class NeptuneDataset(Dataset):
         x_s = torch.stack([x_s for x_s, _ in states])
         x_o = torch.stack([x_o for _, x_o in states])
 
-        n = self.input_states
-        c_inp = self.preprocess_conditioning(dates[n - 1])
+        n, k = self.input_states, max(self.output_states, 1)
+        c_inp = [self.preprocess_conditioning(date) for date in dates[n - 1 : n - 1 + k]]
 
-        return x_s[:n], x_o[:n], x_s[n:], x_o[n:], c_inp, dates
+        return x_s[:n], x_o[:n], x_s[n:], x_o[n:], torch.stack(c_inp), dates
 
     def _statistics(
         self,
