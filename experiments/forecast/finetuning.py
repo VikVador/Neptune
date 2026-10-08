@@ -6,8 +6,6 @@ import dask
 import math
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
-import wandb
 
 from dawgz import job, schedule
 from omegaconf import OmegaConf
@@ -16,6 +14,8 @@ from shaggy.optimizers.soap import SOAP
 from shaggy.tools import load, load_config, save
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+import wandb
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
@@ -54,28 +54,12 @@ def _load_model(
     return model, config
 
 
-def _noise_forcing(c: Tensor, std: float) -> Tensor:
-    r"""Add a smooth Gaussian noise to the ERA5 conditioning, mimicking the errors of an atmospheric forecast.
-
-    Arguments:
-        c   : ERA5 conditioning (B, C_c, Y, X).
-        std : Standard deviation of the noise on the coarse grid, in standardized units.
-
-    Returns:
-        c : Noisy ERA5 conditioning, same shape.
-    """
-
-    noise = torch.randn(*c.shape[:2], c.shape[-2] // 16, c.shape[-1] // 16, device=c.device)
-
-    return c + std * F.interpolate(noise, size=c.shape[-2:], mode="bilinear")
-
-
 def forward_loss(
     model   : torch.nn.Module,
     batch   : tuple,
     members : int,
     weights : tuple[Tensor, Tensor, Tensor],
-    noise   : list[float] | None,
+    noise   : list[float],
     device  : torch.device,
 ) -> tuple[Tensor, Tensor]:
     r"""Forecast autoregressively the next K states of a batch with an ensemble and compute its weighted CRPS.
@@ -85,7 +69,7 @@ def forward_loss(
         batch   : Window of previous and future states, with the conditioning and dates.
         members : Number of ensemble members E.
         weights : Loss weights of the days of the rollout.
-        noise   : Standard deviation of the noise added to the ERA5 conditioning of each step, or None.
+        noise   : Standard deviation of the noise added to the ERA5 conditioning of each step (K,).
         device  : Target device.
 
     Returns:
@@ -98,15 +82,14 @@ def forward_loss(
     n, k = x_inp_s.shape[1], x_out_s.shape[1]
 
     # Each member is rolled out as a sample of its own, (B, ...) → (B * E, ...)
-    x_inp_s, x_inp_o, c_inp = (t.to(device).repeat_interleave(members, dim=0) for t in (x_inp_s, x_inp_o, c_inp))
+    x_inp_s, x_inp_o = (t.to(device).repeat_interleave(members, dim=0) for t in (x_inp_s, x_inp_o))
 
     x_pred_s, x_pred_o = [], []
     for step in range(k):
 
-        # Conditioning | Date and (noisy) ERA5 of the last input state, dates[N - 1 + step] after the collate
-        days           = [day for day in dates[n - 1 + step] for _ in range(members)]
-        c              = c_inp[:, step] if noise is None else _noise_forcing(c_inp[:, step], noise[step])
-        cond_s, cond_o = get_weights_conditioning(days, c, device=device)
+        # Conditioning | Date and (noisy) ERA5 of the last input state, the same for every member
+        cond_s, cond_o = get_weights_conditioning(dates[n - 1 + step], c_inp[:, step], noise=noise[step], device=device)
+        cond_s, cond_o = cond_s.repeat_interleave(members, dim=0), cond_o.repeat_interleave(members, dim=0)
 
         with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
             x_s, x_o = model(x_inp_s, x_inp_o, cond_s, cond_o)
@@ -255,7 +238,7 @@ def training(
     weights = (torch.tensor(rollout_weights, device=device), *get_weights_loss(device=device))
 
     # Noise | Added to the ERA5 conditioning of each step during training, the validation using the true forcing
-    noise = noise_forcing_levels if noise_forcing else None
+    noise = noise_forcing_levels if noise_forcing else [0.0] * rollout_days
 
     # Model | Masks, meshes and statistics are identical on every process, no need to broadcast them, and the
     #         static graph allows the parameters to be used once per step of the rollout before the backward pass
@@ -351,7 +334,7 @@ def training(
             loss_validation = torch.zeros(2)
             with torch.no_grad():
                 for _ in range(batches_validation):
-                    loss_surface, loss_ocean = forward_loss(model, next(dataloader_validation), members, weights, None, device)
+                    loss_surface, loss_ocean = forward_loss(model, next(dataloader_validation), members, weights, [0.0] * rollout_days, device)
                     loss_validation         += torch.tensor([loss_surface.item(), loss_ocean.item()]) / batches_validation
             model.train()
 

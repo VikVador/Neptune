@@ -14,6 +14,7 @@ __all__ = [
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import xarray as xr
 
 from collections.abc import Sequence
@@ -286,13 +287,19 @@ def get_weights_conditioning(
     dates: Sequence[str],
     c_inp: Tensor,
     *,
+    noise: float = 0.0,
     device: torch.device | str | None = None,
 ) -> tuple[Tensor, Tensor]:
     r"""Build the conditioning of the FGN, from the last input state x_t of each sample.
 
+    The ERA5 conditioning can be perturbed by a smooth Gaussian noise, mimicking the large-scale errors
+    of an atmospheric forecast. It is drawn on a grid 16 times coarser (~40 km) and interpolated
+    bilinearly, since the encoder would smooth out a white noise.
+
     Arguments:
         dates  : Date strings 'YYYY-MM-DD' of the last input states (B,).
         c_inp  : ERA5 conditioning of the last input states (B, C_c, Y, X).
+        noise  : Standard deviation of the noise on the coarse grid, in standardized units.
         device : Target device ("cpu" or "cuda").
 
     Returns:
@@ -304,7 +311,12 @@ def get_weights_conditioning(
     date_s = torch.cat([date_s for date_s, _ in encodings])
     date_o = torch.cat([date_o for _, date_o in encodings])
 
-    return torch.cat([date_s, c_inp.to(date_s.device)], dim=1), date_o
+    c_inp = c_inp.to(date_s.device)
+    if noise > 0:
+        coarse = torch.randn(*c_inp.shape[:2], Y // 16, X // 16, device=c_inp.device)
+        c_inp = c_inp + noise * F.interpolate(coarse, size=(Y, X), mode="bilinear")
+
+    return torch.cat([date_s, c_inp], dim=1), date_o
 
 
 def get_weights_stats(
