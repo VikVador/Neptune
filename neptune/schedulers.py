@@ -34,9 +34,8 @@ def warmup_cosine_decay(
     # Security
     assert lr_peak > 0, f"ERROR - lr_peak must be > 0, got {lr_peak}."
     assert total_steps > 0, f"ERROR - total_steps must be > 0, got {total_steps}."
-    assert 0 <= warmup_steps <= total_steps, (
-        f"ERROR - warmup_steps must be in [0, {total_steps}], got {warmup_steps}."
-    )
+    warmup_valid = 0 <= warmup_steps <= total_steps
+    assert warmup_valid, f"ERROR - warmup_steps must be in [0, {total_steps}], got {warmup_steps}."
 
     def _lr_lambda(step: int) -> float:
         r"""Compute the learning rate multiplier for a given optimizer step."""
