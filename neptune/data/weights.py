@@ -4,6 +4,7 @@ __all__ = [
     "get_weights_mask",
     "get_weights_mesh",
     "get_weights_date",
+    "get_weights_conditioning",
     "get_weights_stats",
     "get_weights_stats_conditioning",
     "get_weights_increments",
@@ -15,6 +16,7 @@ import numpy as np
 import torch
 import xarray as xr
 
+from collections.abc import Sequence
 from datetime import date as Date
 from pathlib import Path
 from torch import Tensor
@@ -278,6 +280,31 @@ def get_weights_date(
     date_ocean = encoding[:, None, None, None].expand(2, Z, Y, X)
 
     return _prepare(date_surface, dim, device), _prepare(date_ocean, dim, device)
+
+
+def get_weights_conditioning(
+    dates: Sequence[str],
+    c_inp: Tensor,
+    *,
+    device: torch.device | str | None = None,
+) -> tuple[Tensor, Tensor]:
+    r"""Build the conditioning of the FGN, from the last input state x_t of each sample.
+
+    Arguments:
+        dates  : Date strings 'YYYY-MM-DD' of the last input states (B,).
+        c_inp  : ERA5 conditioning of the last input states (B, C_c, Y, X).
+        device : Target device ("cpu" or "cuda").
+
+    Returns:
+        cond_s : Surface conditioning, encoded date and ERA5 (B, 2 + C_c, Y, X).
+        cond_o : Ocean conditioning, encoded date (B, 2, Z, Y, X).
+    """
+
+    encodings = [get_weights_date(date, dim=2, device=device) for date in dates]
+    date_s = torch.cat([date_s for date_s, _ in encodings])
+    date_o = torch.cat([date_o for _, date_o in encodings])
+
+    return torch.cat([date_s, c_inp.to(date_s.device)], dim=1), date_o
 
 
 def get_weights_stats(
