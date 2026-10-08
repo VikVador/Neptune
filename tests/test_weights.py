@@ -17,6 +17,7 @@ from neptune.data.weights import (
     _constant_levels,
     _encode_sin_cos,
     get_weights_bounds,
+    get_weights_conditioning,
     get_weights_date,
     get_weights_increments,
     get_weights_loss,
@@ -51,6 +52,26 @@ def test_get_weights_date_typical() -> None:
     assert date_ocean.shape == (1, 2, Z, Y, X)
     assert (date_surface[0, :, 0, 0] - jan_01[:, 0, 0]).norm() < 0.05
     assert (jan_01[:, 0, 0] - jul_01[:, 0, 0]).norm() > 1.9
+
+
+def test_get_weights_conditioning_typical() -> None:
+    r"""Determines if the surface conditioning stacks the date of each sample and its ERA5."""
+
+    dates, c_inp = ["2000-01-01", "2000-07-01"], torch.randn(2, 6, Y, X)
+    cond_s, cond_o = get_weights_conditioning(dates, c_inp)
+    jan_01, _ = get_weights_date("2000-01-01")
+
+    assert cond_s.shape == (2, 8, Y, X)
+    assert cond_o.shape == (2, 2, Z, Y, X)
+    assert torch.equal(cond_s[0, :2], jan_01)
+    assert torch.equal(cond_s[:, 2:], c_inp)
+
+    noisy_s, _ = get_weights_conditioning(dates, c_inp, noise=0.1)
+    noise = noisy_s[:, 2:] - c_inp
+
+    assert torch.equal(noisy_s[:, :2], cond_s[:, :2])
+    assert 0 < noise.std() < 0.1
+    assert (noise[..., 1:, :] - noise[..., :-1, :]).abs().max() < 0.1
 
 
 @pytest.mark.integration

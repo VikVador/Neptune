@@ -1,0 +1,36 @@
+WandB:
+    "entity"  : ["neptuneAI"]
+    "project" : ["neptune-finetuning-forecast"]
+    "mode"    : ["online"]
+
+Cluster:
+    "account"       : ["bsmfc"]
+    "partition"     : ["ia"]
+    "time"          : ["48:00:00"]
+    "nodes"         : [2]
+    "cpus-per-node" : [64]
+    "gpus-per-node" : [8]
+    "ram-per-node"  : ["480GB"]
+
+State:
+    "saving"          : [true]
+    "checkpoint_name" : ["FGN_in2_lc256_cf121_tk2304_hc1024_hb16__4827"]
+
+Training:
+    "members"              : [2]
+    "batch_size_per_step"  : [128]
+    "batch_size_per_gpu"   : [1]
+    "steps_update"         : [8192]
+    "steps_logging"        : [4]
+    "steps_validation"     : [256]
+    "batches_validation"   : [128]
+    "num_workers"          : [4]
+    "prefetch_factor"      : [1]
+    "learning_rate_start"  : [0.000002]
+    "learning_rate_peak"   : [0.000020]
+    "learning_rate_end"    : [0.000001]
+    "warmup_steps"         : [256]
+    "rollout_days"         : [3]
+    "rollout_weights"      : [[1.0, 1.0, 1.0]]
+    "noise_forcing"        : [true]
+    "noise_forcing_levels" : [[0.0, 0.025, 0.05]]

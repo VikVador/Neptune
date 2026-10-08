@@ -1,4 +1,4 @@
-r"""Launch the training of a Functional Generative Network (FGN) forecasting the next day."""
+r"""Launch the fine-tuning of a pre-trained Functional Generative Network (FGN) on its own rollouts."""
 
 import argparse
 import cloudpickle
@@ -17,11 +17,10 @@ from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from neptune.config import PATH_MODELS
-from neptune.data import DATASET_CONDITIONING
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_conditioning, get_weights_loss
 from neptune.distributed import reduce_mean, setup_distributed
-from neptune.loss import loss_crps
+from neptune.loss import loss_crps_rollout
 from neptune.model import FGN
 from neptune.schedulers import warmup_cosine_decay
 from neptune.tools import generate_run_name_fgn, get_wandb_hyperparameters, load_configuration
@@ -29,16 +28,14 @@ from neptune.tools import generate_run_name_fgn, get_wandb_hyperparameters, load
 
 # fmt: off
 #
-def _build_model(
-    config_model    : dict,
-    checkpoint_name : str | None,
+def _load_model(
+    checkpoint_name : str,
     device          : torch.device,
 ) -> tuple[FGN, dict]:
-    r"""Build a FGN from scratch, or resume one from a checkpoint.
+    r"""Load a pre-trained FGN, the fine-tuning never starting from scratch.
 
     Arguments:
-        config_model    : Constructor kwargs of the FGN, used when training from scratch.
-        checkpoint_name : Name of the checkpoint to resume from (if applicable).
+        checkpoint_name : Name of the checkpoint to fine-tune.
         device          : Target device.
 
     Returns:
@@ -46,14 +43,12 @@ def _build_model(
         config : Constructor kwargs.
     """
 
-    if checkpoint_name is not None:
-        ckpt_path = PATH_MODELS / checkpoint_name
-        config    = OmegaConf.to_container(load_config(ckpt_path))
-        model     = load(ckpt_path, FGN, device=str(device)).train()
-    else:
-        # Conditioning | Date (sin, cos) of the surface and ocean, and ERA5 of the surface only
-        config = {**config_model, "cond_channels_surface": 2 + len(DATASET_CONDITIONING)}
-        model  = FGN(**config).to(device)
+    # Security
+    assert checkpoint_name is not None, "ERROR - The fine-tuning requires a pre-trained checkpoint_name."
+
+    ckpt_path = PATH_MODELS / checkpoint_name
+    config    = OmegaConf.to_container(load_config(ckpt_path))
+    model     = load(ckpt_path, FGN, device=str(device)).train()
 
     return model, config
 
@@ -62,52 +57,69 @@ def forward_loss(
     model   : torch.nn.Module,
     batch   : tuple,
     members : int,
-    weights : tuple[Tensor, Tensor],
+    weights : tuple[Tensor, Tensor, Tensor],
+    noise   : list[float],
     device  : torch.device,
 ) -> tuple[Tensor, Tensor]:
-    r"""Forecast the next states of a batch with an ensemble and compute its CRPS.
+    r"""Forecast autoregressively the next K states of a batch with an ensemble and compute its weighted CRPS.
 
     Arguments:
         model   : FGN, possibly wrapped by DDP.
-        batch   : Window of previous and future states, with the conditioning and dates, from NeptuneDataset.
+        batch   : Window of previous and future states, with the conditioning and dates.
         members : Number of ensemble members E.
-        weights : Loss weights of the surface and ocean variables, from get_weights_loss.
+        weights : Loss weights of the days of the rollout.
+        noise   : Standard deviation of the noise added to the ERA5 conditioning of each step (K,).
         device  : Target device.
 
     Returns:
-        loss_surface : Weighted CRPS of the surface variables.
-        loss_ocean   : Weighted CRPS of the ocean variables.
+        loss_surface : CRPS of the surface variables, weighted over the days of the rollout.
+        loss_ocean   : CRPS of the ocean variables, weighted over the days of the rollout.
     """
 
     x_inp_s, x_inp_o, x_out_s, x_out_o, c_inp, dates = batch
-    fgn = model.module if hasattr(model, "module") else model
+    fgn  = model.module if hasattr(model, "module") else model
+    n, k = x_inp_s.shape[1], x_out_s.shape[1]
 
-    # The collate transposes the dates, dates[N - 1] holds the date of the last input state of each sample
-    cond_s, cond_o   = get_weights_conditioning(dates[x_inp_s.shape[1] - 1], c_inp[:, 0], device=device)
-    x_inp_s, x_inp_o = x_inp_s.to(device), x_inp_o.to(device)
-    x_s, x_o         = x_out_s[:, 0].to(device), x_out_o[:, 0].to(device)
+    # Each member is rolled out as a sample of its own, (B, ...) → (B * E, ...)
+    x_inp_s, x_inp_o = (t.to(device).repeat_interleave(members, dim=0) for t in (x_inp_s, x_inp_o))
 
-    with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
-        x_pred_s, x_pred_o = model(x_inp_s, x_inp_o, cond_s, cond_o, members=members)
+    x_pred_s, x_pred_o = [], []
+    for step in range(k):
 
-    return loss_crps(
-        x_pred_s.float(), x_pred_o.float(), x_s, x_o, fgn.mask_surface, fgn.mask_ocean, *weights
+        # Conditioning | Date and (noisy) ERA5 of the last input state, the same for every member
+        cond_s, cond_o = get_weights_conditioning(dates[n - 1 + step], c_inp[:, step], noise=noise[step], device=device)
+        cond_s, cond_o = cond_s.repeat_interleave(members, dim=0), cond_o.repeat_interleave(members, dim=0)
+
+        with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
+            x_s, x_o = model(x_inp_s, x_inp_o, cond_s, cond_o)
+
+        x_pred_s.append(x_s[:, 0])
+        x_pred_o.append(x_o[:, 0])
+
+        # Sliding window | Oldest state out, forecast in
+        x_inp_s = torch.cat([x_inp_s[:, 1:], x_s], dim=1)
+        x_inp_o = torch.cat([x_inp_o[:, 1:], x_o], dim=1)
+
+    # Members gathered along the ensemble dimension, (B * E, K, ...) → (B, E, K, ...)
+    x_pred_s = torch.stack(x_pred_s, dim=1).unflatten(0, (-1, members)).float()
+    x_pred_o = torch.stack(x_pred_o, dim=1).unflatten(0, (-1, members)).float()
+
+    return loss_crps_rollout(
+        x_pred_s, x_pred_o, x_out_s.to(device), x_out_o.to(device), fgn.mask_surface, fgn.mask_ocean, *weights
     )
 
 
 def training(
     config_state    : dict,
     config_training : dict,
-    config_model    : dict,
     config_wandb    : dict,
     config_cluster  : dict,
 ) -> None:
-    r"""Launch the training of a FGN forecasting the next day.
+    r"""Launch the fine-tuning of a pre-trained FGN on its own rollouts.
 
     Arguments:
-        config_state    : Checkpointing and saving options.
-        config_training : Ensemble, batch sizes, optimizer steps and learning rate schedule.
-        config_model    : Architecture of the FGN.
+        config_state    : Checkpoint to fine-tune and saving options.
+        config_training : Ensemble, rollout, noise of the forcing, batch sizes, optimizer steps and learning rate schedule.
         config_wandb    : Weights & Biases entity, project and mode.
         config_cluster  : Slurm resources, logged alongside the run for traceability.
     """
@@ -134,6 +146,10 @@ def training(
         lr_peak,
         lr_end,
         warmup_steps,
+        rollout_days,
+        rollout_weights,
+        noise_forcing,
+        noise_forcing_levels,
     ) = (
         config_state["saving"],
         config_state["checkpoint_name"],
@@ -150,10 +166,19 @@ def training(
         config_training["learning_rate_peak"],
         config_training["learning_rate_end"],
         config_training["warmup_steps"],
+        config_training["rollout_days"],
+        config_training["rollout_weights"],
+        config_training["noise_forcing"],
+        config_training["noise_forcing_levels"],
     )
 
-    # Model | Loading a checkpoint or building from scratch
-    model, config = _build_model(config_model, checkpoint_name, device)
+    # Security
+    assert len(rollout_weights) == rollout_days, f"ERROR - rollout_weights must have {rollout_days} elements, got {len(rollout_weights)}."
+    assert all(w >= 0 for w in rollout_weights) and sum(rollout_weights) > 0, f"ERROR - rollout_weights must be non-negative, with a positive sum, got {rollout_weights}."
+    assert len(noise_forcing_levels) == rollout_days, f"ERROR - noise_forcing_levels must have {rollout_days} elements, got {len(noise_forcing_levels)}."
+
+    # Model | Loading the pre-trained checkpoint
+    model, config = _load_model(checkpoint_name, device)
 
     # Weights & Biases | Run named after the architecture
     run_name = generate_run_name_fgn(
@@ -205,16 +230,20 @@ def training(
         world_size      = world_size,
         is_distributed  = is_distributed,
         input_states    = model.input_states,
-        output_states   = 1,
+        output_states   = rollout_days,
     )
 
-    # Loss | CRPS of the normalized increments, averaged over the non-constant variable-levels
-    weights = get_weights_loss(device=device)
+    # Loss | CRPS of the normalized increments, averaged over the non-constant variable-levels and weighted over the days
+    weights = (torch.tensor(rollout_weights, device=device), *get_weights_loss(device=device))
 
-    # Model | Masks, meshes and statistics are identical on every process, no need to broadcast them
+    # Noise | Added to the ERA5 conditioning of each step, during the training and the validation
+    noise = noise_forcing_levels if noise_forcing else [0.0] * rollout_days
+
+    # Model | Masks, meshes and statistics are identical on every process, no need to broadcast them, and the
+    #         static graph allows the parameters to be used once per step of the rollout before the backward pass
     if is_distributed:
         ddp_kwargs = {"device_ids": [local_rank], "output_device": local_rank} if device.type == "cuda" else {}
-        model      = DDP(model, broadcast_buffers=False, gradient_as_bucket_view=True, **ddp_kwargs)
+        model      = DDP(model, broadcast_buffers=False, gradient_as_bucket_view=True, static_graph=True, **ddp_kwargs)
 
     # Setting up training tools
     optimizer = SOAP(
@@ -245,7 +274,7 @@ def training(
     for step, batch in enumerate(dataloader_training):
 
         # Forward pass and loss (surface, ocean)
-        loss_surface, loss_ocean = forward_loss(model, batch, members, weights, device)
+        loss_surface, loss_ocean = forward_loss(model, batch, members, weights, noise, device)
 
         # Gradient accumulation
         loss              = (loss_surface + loss_ocean) / steps_gradient_accumulation
@@ -304,7 +333,7 @@ def training(
             loss_validation = torch.zeros(2)
             with torch.no_grad():
                 for _ in range(batches_validation):
-                    loss_surface, loss_ocean = forward_loss(model, next(dataloader_validation), members, weights, device)
+                    loss_surface, loss_ocean = forward_loss(model, next(dataloader_validation), members, weights, noise, device)
                     loss_validation         += torch.tensor([loss_surface.item(), loss_ocean.item()]) / batches_validation
             model.train()
 
@@ -334,13 +363,13 @@ def training(
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Launch a FGN training pipeline.")
+    parser = argparse.ArgumentParser(description="Launch the fine-tuning of a pre-trained FGN on its own rollouts.")
     parser.add_argument(
         "--config",
         "-c",
         type=str,
         required=True,
-        help="Path to the training .yml configuration file.",
+        help="Path to the fine-tuning .yml configuration file.",
     )
 
     parser.add_argument(
@@ -368,7 +397,6 @@ if __name__ == "__main__":
             training(
                 config_state    = config["State"],
                 config_training = config["Training"],
-                config_model    = config["Model"],
                 config_wandb    = config_wandb,
                 config_cluster  = config_cluster,
             )
@@ -412,20 +440,19 @@ if __name__ == "__main__":
             account   = config_cluster["account"],
             partition = config_cluster["partition"],
         )
-        def train(i: int) -> None:
-            r"""Train the FGN of the i-th configuration."""
+        def finetune(i: int) -> None:
+            r"""Fine-tune the FGN of the i-th configuration."""
 
             training(
                 config_state    = configs[i]["State"],
                 config_training = configs[i]["Training"],
-                config_model    = configs[i]["Model"],
                 config_wandb    = config_wandb,
                 config_cluster  = config_cluster,
             )
 
         schedule(
-            train,
-            name="NEPT-TRAIN",
+            finetune,
+            name="NEPT-FINETUNE",
             backend="slurm",
             interpreter=interpreter,
             export="ALL",

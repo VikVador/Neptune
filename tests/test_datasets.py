@@ -81,8 +81,8 @@ def test_getitem_window(tiny_ds: NeptuneDataset, monkeypatch: pytest.MonkeyPatch
     assert dates == [f"2000-01-{d:02d}" for d in range(5, 10)]
     assert x_inp_o[:, 0, 0, 0, 0].tolist() == [5.0, 6.0]
     assert x_out_s[:, 0, 0, 0].tolist() == [7.0, 8.0, 9.0]
-    assert c_inp.shape == (2, 8, 8)
-    assert (c_inp == 6.0).all()
+    assert c_inp.shape == (3, 2, 8, 8)
+    assert c_inp[:, 0, 0, 0].tolist() == [6.0, 7.0, 8.0]
 
 
 def test_standardize_outliers(tiny_ds: NeptuneDataset) -> None:
@@ -113,7 +113,7 @@ def test_getitem_real() -> None:
     assert x_inp_o.shape == (2, len(DATASET_VARIABLES_OCEAN), Z, Y, X)
     assert x_out_s.shape == (1, len(DATASET_VARIABLES_SURFACE), Y, X)
     assert x_out_o.shape == (1, len(DATASET_VARIABLES_OCEAN), Z, Y, X)
-    assert c_inp.shape == (len(DATASET_CONDITIONING), Y, X)
+    assert c_inp.shape == (1, len(DATASET_CONDITIONING), Y, X)
     assert dates == ["1998-01-01", "1998-01-02", "1998-01-03"]
     assert c_inp.isfinite().all()
     assert not x_inp_o.isnan().any()
