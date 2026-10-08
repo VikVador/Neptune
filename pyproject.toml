@@ -49,6 +49,7 @@ preview = true
 "test_*.py" = ["F403", "F405"]
 
 [tool.ruff.lint.isort]
+known-third-party = ["wandb"]
 lines-between-types = 1
 relative-imports-order = "closest-to-furthest"
 section-order = ["future", "third-party", "first-party", "local-folder"]

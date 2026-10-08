@@ -6,6 +6,7 @@ import dask
 import math
 import torch
 import torch.distributed as dist
+import wandb
 
 from dawgz import job, schedule
 from omegaconf import OmegaConf
@@ -14,8 +15,6 @@ from shaggy.optimizers.soap import SOAP
 from shaggy.tools import load, load_config, save
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
-
-import wandb
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
