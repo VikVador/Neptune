@@ -3,12 +3,12 @@ r"""Global constants for diagnostics."""
 __all__ = [
     "TRANSLATIONS_VARS",
     "TRANSLATIONS_METRICS",
+    "TRANSLATIONS_MODELS",
     "UNITS",
     "CMAPS_LINE_MODELS",
-    "CMAPS_LINE_VARS",
-    "CMAPS_SPATIAL_METRICS",
     "CMAPS_SPATIAL_VARS",
-    "SEASONS",
+    "CMAPS_METRICS",
+    "LAYERS",
     "SPLITS",
     "FIG_PROPERTIES",
 ]
@@ -25,27 +25,18 @@ SPLITS = {
     "test"       : DATASET_DATES_TEST,
 }
 
-SEASONS = {
-    "winter" : (1,   2, 3),
-    "spring" : (4,   5, 6),
-    "summer" : (7,   8, 9),
-    "autumn" : (10, 11, 12),
-}
+# Depths [m] separating the layers of the ocean, each level belonging to the layer of its depth
+LAYERS = [200]
 
+# Font sizes of the figure titles, panel titles (and axis labels, legends), row labels, ticks and small texts,
+# and quantile of a field giving the upper limit of the colors of the skill and spread
 FIG_PROPERTIES = {
-    "figsize"                   : (14, 18),
-    "fs_title"                  : 12,
-    "fs_x_label"                : 12,
-    "fs_y_label"                : 12,
-    "fs_x_tick"                 : 11,
-    "fs_y_tick"                 : 11,
-    "fs_sup_x_label"            : 14,
-    "fs_sup_y_label"            : 14,
-    "line_width"                : 2,
-    "line_opacity"              : 1,
-    "line_opacity_fill_between" : 0.25,
-    "quantile_vmin"             : 0.02,
-    "quantile_vmax"             : 0.98,
+    "fs_suptitle"   : 13,
+    "fs_title"      : 11,
+    "fs_label"      : 10,
+    "fs_tick"       : 9,
+    "fs_text"       : 8,
+    "quantile_vmax" : 0.97,
 }
 
 TRANSLATIONS_VARS = {
@@ -70,48 +61,37 @@ TRANSLATIONS_METRICS = {
     "ratio"  : "Spread-Skill Ratio",
 }
 
+TRANSLATIONS_MODELS = {
+    "forecast"    : "Neptune",
+    "persistence" : "Persistence",
+    "climatology" : "Climatology",
+}
+
 UNITS = {
-    "tauuo"    : "[N/m^2]",
-    "tauvo"    : "[N/m^2]",
-    "ssh"      : "[m]",
-    "uo"       : "[m/s]",
-    "vo"       : "[m/s]",
-    "votemper" : "[°C]",
-    "vosaline" : "[PSU]",
-    "CHL"      : "[mg/m^3]",
-    "DOX"      : "[mmol/m^3]",
-    "PAR"      : "[W/m^2]",
-    "PHO"      : "[mmol/m^3]",
-    "SIO"      : "[mmol/m^3]",
-    "NOS"      : "[mmol/m^3]",
+    "tauuo"    : "N/m^2",
+    "tauvo"    : "N/m^2",
+    "ssh"      : "m",
+    "uo"       : "m/s",
+    "vo"       : "m/s",
+    "votemper" : "°C",
+    "vosaline" : "PSU",
+    "CHL"      : "mg/m^3",
+    "DOX"      : "mmol/m^3",
+    "PAR"      : "W/m^2",
+    "PHO"      : "mmol/m^3",
+    "SIO"      : "mmol/m^3",
+    "NOS"      : "mmol/m^3",
 }
 
 CMAPS_LINE_MODELS = {
-    "forecast"    : "#4d68d7",
     "persistence" : "#808080",
-    "climatology" : "#E67E22",
+    "climatology" : "#000000",
 }
 
-CMAPS_LINE_VARS = {
-    "tauuo"    : "#cfa155",
-    "tauvo"    : "#8fd3c8",
-    "ssh"      : "#9C7AFF",
-    "uo"       : "#4d68d7",
-    "vo"       : "#b60d29",
-    "votemper" : "#E67E22",
-    "vosaline" : "#BF3F64",
-    "CHL"      : "#40C88C",
-    "DOX"      : "#0077B6",
-    "PAR"      : "#d4b325",
-    "PHO"      : "#88a47a",
-    "SIO"      : "#06736d",
-    "NOS"      : "#262e47",
-}
-
-CMAPS_SPATIAL_METRICS = {
-    "skill"  : plt_cm.magma,
-    "spread" : plt_cm.cividis,
-    "ratio"  : plt_cm.RdBu_r,
+# Light for a null skill or spread and for a ratio of 1, darker away from them, per group of variables
+CMAPS_METRICS = {
+    "physique"     : {"skill": plt_cm.Reds,    "spread": plt_cm.Oranges, "ratio": plt_cm.RdBu},
+    "biogeochimie" : {"skill": plt_cm.BuPu,    "spread": plt_cm.Purples, "ratio": plt_cm.RdBu},
 }
 
 CMAPS_SPATIAL_VARS = {

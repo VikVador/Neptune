@@ -2,6 +2,7 @@ r"""Geography helpers for map visualizations."""
 
 __all__ = [
     "load_grid",
+    "load_depth",
     "draw_geography",
 ]
 
@@ -27,6 +28,17 @@ def load_grid() -> tuple[np.ndarray, np.ndarray]:
         lon = ds["longitude"].values[DATASET_REGION["x"]]
 
     return np.meshgrid(lon, lat)
+
+
+def load_depth() -> np.ndarray:
+    r"""Load the depth of each level of the dataset region.
+
+    Returns:
+        depth : Depth of each level (Z,) [m].
+    """
+
+    with xr.open_zarr(PATH_MASK) as ds:
+        return ds["level"].values[DATASET_REGION["z"]]
 
 
 def draw_geography(ax: plt.Axes) -> None:
