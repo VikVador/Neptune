@@ -20,7 +20,6 @@ from neptune.data import (
     DATASET_DATES_TRAINING,
     DATASET_DATES_VALIDATION,
     DATASET_REGION,
-    DATASET_VARIABLES,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     VARIABLES_CLIPPING,
@@ -46,6 +45,7 @@ class NeptuneDataset(Dataset):
         output_states  : Number of future states K to predict.
         standardized   : If True, standardize each variable using statistics.
         fill_with_nans : If True, land pixels are set to NaN instead of 0.
+        group          : Group of variables to load, 'surface' or 'ocean', or None for both (the other one being empty).
     """
 
     def __init__(
@@ -56,17 +56,21 @@ class NeptuneDataset(Dataset):
         output_states: int = 1,
         standardized: bool = True,
         fill_with_nans: bool = False,
+        group: str | None = None,
     ) -> None:
         super().__init__()
 
         # Security
         assert_date_format(date_start)
         assert_date_format(date_end)
+        valid = group in (None, "surface", "ocean")
+        assert valid, f"ERROR - group must be 'surface', 'ocean' or None, got {group}."
 
         self.input_states = input_states
         self.output_states = output_states
         self.standardized = standardized
         self.fill_with_nans = fill_with_nans
+        self.group = group
         self.mask_surface, self.mask_ocean = get_weights_mask()
         self.stats = get_weights_stats()
         self.stats_conditioning = get_weights_stats_conditioning()
@@ -124,36 +128,47 @@ class NeptuneDataset(Dataset):
 
     def _statistics(
         self,
-        x_s: Tensor,
+        x_s: Tensor | None,
+        x_o: Tensor | None,
         stats: tuple[Tensor, Tensor, Tensor, Tensor],
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         r"""Return statistics on the device and dtype of the states.
 
         Arguments:
-            x_s   : Surface states (..., C_s, Y, X).
+            x_s   : Surface states (..., C_s, Y, X), or None if not loaded.
+            x_o   : Ocean states (..., C_o, Z, Y, X), or None if not loaded.
             stats : Statistics (mean_s, std_s, mean_o, std_o), from get_weights_stats.
 
         Returns:
             mean_s, std_s : Surface statistics (C_s, 1, 1).
             mean_o, std_o : Ocean statistics (C_o, Z, 1, 1).
         """
-        return tuple(t.to(x_s.device, dtype=x_s.dtype) for t in stats)
+        x = x_s if x_s is not None else x_o
 
-    def standardize(self, x_s: Tensor, x_o: Tensor) -> tuple[Tensor, Tensor]:
+        return tuple(t.to(x.device, dtype=x.dtype) for t in stats)
+
+    def standardize(
+        self, x_s: Tensor | None, x_o: Tensor | None
+    ) -> tuple[Tensor | None, Tensor | None]:
         r"""Standardize surface and ocean states using precomputed statistics.
 
         Arguments:
-            x_s : Surface states (..., C_s, Y, X).
-            x_o : Ocean states (..., C_o, Z, Y, X).
+            x_s : Surface states (..., C_s, Y, X), or None if not loaded.
+            x_o : Ocean states (..., C_o, Z, Y, X), or None if not loaded.
 
         Returns:
             x_s : Standardized surface states, same shape.
             x_o : Standardized ocean states, same shape.
         """
 
-        mean_s, std_s, mean_o, std_o = self._statistics(x_s, self.stats)
+        mean_s, std_s, mean_o, std_o = self._statistics(x_s, x_o, self.stats)
 
-        return (x_s - mean_s) / std_s, (x_o - mean_o) / std_o
+        if x_s is not None:
+            x_s = (x_s - mean_s) / std_s
+        if x_o is not None:
+            x_o = (x_o - mean_o) / std_o
+
+        return x_s, x_o
 
     def unstandardize(self, x_s: Tensor, x_o: Tensor) -> tuple[Tensor, Tensor]:
         r"""Reverse the standardization of surface and ocean states.
@@ -167,21 +182,21 @@ class NeptuneDataset(Dataset):
             x_o : Ocean states in physical units, same shape.
         """
 
-        mean_s, std_s, mean_o, std_o = self._statistics(x_s, self.stats)
+        mean_s, std_s, mean_o, std_o = self._statistics(x_s, x_o, self.stats)
 
         return x_s * std_s + mean_s, x_o * std_o + mean_o
 
     def replace_outliers(
         self,
-        x_s: Tensor,
-        x_o: Tensor,
+        x_s: Tensor | None,
+        x_o: Tensor | None,
         n_std: float = 10.0,
-    ) -> tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor | None, Tensor | None]:
         r"""Replace statistical outliers of surface and ocean states with their global mean.
 
         Arguments:
-            x_s   : Surface states (..., C_s, Y, X).
-            x_o   : Ocean states (..., C_o, Z, Y, X).
+            x_s   : Surface states (..., C_s, Y, X), or None if not loaded.
+            x_o   : Ocean states (..., C_o, Z, Y, X), or None if not loaded.
             n_std : Number of standard deviations used as the outlier threshold.
 
         Returns:
@@ -189,22 +204,28 @@ class NeptuneDataset(Dataset):
             x_o : Ocean states, with outliers replaced by the mean.
         """
 
-        mean_s, std_s, mean_o, std_o = self._statistics(x_s, self.stats_outliers)
-        outliers_s = (x_s - mean_s).abs() > n_std * std_s
-        outliers_o = (x_o - mean_o).abs() > n_std * std_o
+        mean_s, std_s, mean_o, std_o = self._statistics(x_s, x_o, self.stats_outliers)
 
-        return torch.where(outliers_s, mean_s, x_s), torch.where(outliers_o, mean_o, x_o)
+        if x_s is not None:
+            x_s = torch.where((x_s - mean_s).abs() > n_std * std_s, mean_s, x_s)
+        if x_o is not None:
+            x_o = torch.where((x_o - mean_o).abs() > n_std * std_o, mean_o, x_o)
 
-    def _fill_land(self, x: Tensor, mask: Tensor) -> Tensor:
+        return x_s, x_o
+
+    def _fill_land(self, x: Tensor | None, mask: Tensor) -> Tensor:
         r"""Set land pixels to 0, or to NaN if fill_with_nans is True.
 
         Arguments:
-            x    : Surface (..., C_s, Y, X) or ocean (..., C_o, Z, Y, X) states.
+            x    : Surface (..., C_s, Y, X) or ocean (..., C_o, Z, Y, X) states, or None if not loaded.
             mask : Matching land/sea mask, (1, Y, X) or (1, Z, Y, X).
 
         Returns:
-            x : States with land pixels filled, same shape.
+            x : States with land pixels filled, same shape, or an empty tensor if not loaded.
         """
+
+        if x is None:
+            return torch.empty(0)
 
         if self.fill_with_nans:
             return x.masked_fill(mask == 0, float("nan"))
@@ -218,9 +239,14 @@ class NeptuneDataset(Dataset):
             date : Date string 'YYYY-MM-DD'.
 
         Returns:
-            x_s : Surface state (C_s, Y, X).
-            x_o : Ocean state (C_o, Z, Y, X).
+            x_s : Surface state (C_s, Y, X), empty if not loaded.
+            x_o : Ocean state (C_o, Z, Y, X), empty if not loaded.
         """
+
+        surface, ocean = self.group in (None, "surface"), self.group in (None, "ocean")
+        variables_loaded = (DATASET_VARIABLES_SURFACE if surface else []) + (
+            DATASET_VARIABLES_OCEAN if ocean else []
+        )
 
         with xr.open_mfdataset(
             self.date_to_paths[date],
@@ -230,20 +256,20 @@ class NeptuneDataset(Dataset):
             data_vars="minimal",
         ) as raw:
             ds = raw.drop_vars(["nav_lat", "nav_lon"], errors="ignore")
-            missing = [v for v in DATASET_VARIABLES if v not in ds]
+            missing = [v for v in variables_loaded if v not in ds]
             if missing:
                 raise KeyError(f"ERROR - Missing required variables: {missing}")
 
             # Extracting partial domain
             ds = (
-                ds[DATASET_VARIABLES]
+                ds[variables_loaded]
                 .isel(x=DATASET_REGION["x"], y=DATASET_REGION["y"], time_counter=0)
                 .load()
             )
 
         # Clipping and extracting levels
         variables = {}
-        for var in DATASET_VARIABLES:
+        for var in variables_loaded:
             da = ds[var]
             if var in VARIABLES_CLIPPING:
                 lo, hi = VARIABLES_CLIPPING[var]
@@ -253,8 +279,10 @@ class NeptuneDataset(Dataset):
                 da = da.isel({depth_dim: DATASET_REGION["z"]})
             variables[var] = torch.as_tensor(da.values.copy(), dtype=torch.float32)
 
-        x_s = torch.stack([variables[var] for var in DATASET_VARIABLES_SURFACE])
-        x_o = torch.stack([variables[var] for var in DATASET_VARIABLES_OCEAN])
+        x_s = (
+            torch.stack([variables[var] for var in DATASET_VARIABLES_SURFACE]) if surface else None
+        )
+        x_o = torch.stack([variables[var] for var in DATASET_VARIABLES_OCEAN]) if ocean else None
 
         # Preprocessing
         x_s, x_o = self.replace_outliers(x_s, x_o)
