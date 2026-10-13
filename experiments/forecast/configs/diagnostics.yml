@@ -3,8 +3,6 @@ WandB:
   "project" : ["neptune-diagnostics"]
   "mode"    : ["online"]
 
-# Profiled on an A100 40GB with 64 members and chunks of 4 : 210 s, 27 GB of GPU and 19 GB of RAM per metrics window,
-# 280 s, 26 GB of GPU and 22 GB of RAM per animated window
 Cluster:
   "metrics":
     "account"   : ["bsmfc"]
@@ -17,10 +15,10 @@ Cluster:
   "forecasts":
     "account"   : ["bsmfc"]
     "partition" : ["debug-gpu"]
-    "time"      : ["01:45:00"]
-    "cpus"      : [4]
+    "time"      : ["02:00:00"]
+    "cpus"      : [8]
     "gpus"      : [1]
-    "ram"       : ["48GB"]
+    "ram"       : ["60GB"]
 
   "figures":
     "account"   : ["bsmfc"]
@@ -37,7 +35,7 @@ Cluster:
     "ram"       : ["2GB"]
 
 Model:
-  "checkpoint_name" : ["FGN_in2_lc256_cf121_tk2304_hc1024_hb16__4827"]
+  "checkpoint_name" : [null]
 
 Evaluation:
   "split"                : ["validation"]
@@ -46,24 +44,34 @@ Evaluation:
   "chunk"                : [4]
   "stride"               : [1]
   "dates_per_job"        : [2]
-  "noise_forcing"        : [true]
-  "noise_forcing_levels" : [[0.0, 0.025, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]]
+  "noise_forcing"        : [false]
+  "noise_forcing_levels" : [[
+    0.0,
+    0.025,
+    0.05,
+    0.05,
+    0.05,
+    0.05,
+    0.05,
+    0.05,
+    0.05,
+    0.05]]
 
 Animations:
-  "levels"     : [[0, 24, 47]]
   "sections"   : [3]
   "duration"   : [1.5]
-  "dates"      : [
-    ["2020-01-01",
-     "2020-02-01",
-     "2020-03-01",
-     "2020-04-01",
-     "2020-05-01",
-     "2020-06-01",
-     "2020-07-01",
-     "2020-08-01",
-     "2020-09-01",
-     "2020-10-01",
-     "2020-11-01",
-     "2020-12-01"]
-    ]
+  "levels"     : [[0, 24, 47]]
+  "dates"      : [[
+    "2020-01-01",
+    "2020-02-01",
+    "2020-03-01",
+    "2020-04-01",
+    "2020-05-01",
+    "2020-06-01",
+    "2020-07-01",
+    "2020-08-01",
+    "2020-09-01",
+    "2020-10-01",
+    "2020-11-01",
+    "2020-12-01"
+    ]]
