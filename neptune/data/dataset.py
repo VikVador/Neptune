@@ -319,6 +319,7 @@ def get_datasets(
     output_states: int = 1,
     standardized: bool = True,
     fill_with_nans: bool = False,
+    group: str | None = None,
 ) -> tuple[NeptuneDataset, NeptuneDataset, NeptuneDataset]:
     r"""Create train, validation and test datasets using predefined date splits.
 
@@ -327,6 +328,7 @@ def get_datasets(
         output_states  : Number of future states K to predict.
         standardized   : If True, standardize each variable using precomputed statistics.
         fill_with_nans : If True, land pixels are set to NaN instead of 0.
+        group          : Group of variables to load, 'surface' or 'ocean', or None for both.
 
     Returns:
         train : Training dataset
@@ -339,6 +341,7 @@ def get_datasets(
         "output_states": output_states,
         "standardized": standardized,
         "fill_with_nans": fill_with_nans,
+        "group": group,
     }
 
     return (
