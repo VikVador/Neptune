@@ -12,8 +12,6 @@ __all__ = [
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
-import subprocess
-import tempfile
 import torch
 import wandb
 
@@ -24,8 +22,9 @@ from matplotlib.lines import Line2D
 from pathlib import Path
 from PIL import Image
 from torch import Tensor
+from typing import Any
 
-from neptune.config import PATH_DIAGNOSTICS, PATH_FIGURES
+from neptune.config import PATH_ANALYSIS, PATH_DIAGNOSTICS
 from neptune.data import (
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_OCEAN_BIO,
@@ -182,6 +181,20 @@ def _set_colorbar(colorbar: Colorbar, metric: str, ticks: list[float] = _RATIO_T
     if metric == "ratio":
         colorbar.set_ticks(ticks)
         colorbar.minorticks_off()
+
+
+def _save(fig: plt.Figure, path: Path, **kwargs: Any) -> None:
+    r"""Save a figure as a PDF and as a PNG, the image logged to Weights & Biases, then close it.
+
+    Arguments:
+        fig    : Figure to save.
+        path   : Path to the output .pdf file.
+        kwargs : Keyword arguments of Figure.savefig.
+    """
+
+    fig.savefig(path, **kwargs)
+    fig.savefig(path.with_suffix(".png"), dpi=150, **kwargs)
+    plt.close(fig)
 
 
 def _to_gif_palette(images: list[Image.Image]) -> list[Image.Image]:
@@ -357,7 +370,7 @@ def plot_animations(
         else:
             position, name = f"{lat[p, 0]:.2f} {_unit('°N')}", f"{lat[p, 0]:.2f}N"
 
-        folder = PATH_FIGURES / checkpoint_name / split / "animations" / date / plane
+        folder = PATH_ANALYSIS / split / checkpoint_name / "animations" / date / plane
         path = folder / TRANSLATIONS_VARS[variable].lower().replace(" ", "-") / f"{variable}-{name}.gif"
         path.parent.mkdir(parents=True, exist_ok=True)
         animate_forecast(frames, variable, date, plane, position, path, duration)
@@ -399,8 +412,7 @@ def _plot_score_map(fields: dict[str, np.ndarray], metric: str, cmap: Colormap, 
 
     fig.subplots_adjust(hspace=0.25, wspace=0.25)
     fig.supxlabel(_metric(metric), fontsize=_FS["fs_suptitle"], fontweight="bold", y=0.045)
-    fig.savefig(path, bbox_inches="tight")
-    plt.close(fig)
+    _save(fig, path, bbox_inches="tight")
 
 
 def plot_score_maps(
@@ -419,7 +431,7 @@ def plot_score_maps(
     """
 
     for metric, fields in maps.items():
-        folder = PATH_FIGURES / checkpoint_name / split / "score-maps" / day / metric
+        folder = PATH_ANALYSIS / split / checkpoint_name / "score-maps" / day / metric
         folder.mkdir(parents=True, exist_ok=True)
 
         for group, (surface, ocean) in _GROUPS.items():
@@ -515,7 +527,7 @@ def plot_score_local(
         split           : Split of the dataset, 'validation' or 'test'.
     """
 
-    folder = PATH_FIGURES / checkpoint_name / split / "score-local"
+    folder = PATH_ANALYSIS / split / checkpoint_name / "score-local"
     folder.mkdir(parents=True, exist_ok=True)
 
     for group, (surface, ocean) in _GROUPS.items():
@@ -551,8 +563,7 @@ def plot_score_local(
 
         # Saving | The names of the variables, outside of the layout, added to the default artists of the figure
         extra = fig.get_default_bbox_extra_artists() + [name for name in names if name is not None]
-        fig.savefig(folder / f"sl-{group}.pdf", bbox_inches="tight", bbox_extra_artists=extra)
-        plt.close(fig)
+        _save(fig, folder / f"sl-{group}.pdf", bbox_inches="tight", bbox_extra_artists=extra)
 
 
 def _break(top: plt.Axes, bottom: plt.Axes) -> None:
@@ -585,7 +596,7 @@ def plot_score_global(
         split           : Split of the dataset, 'validation' or 'test'.
     """
 
-    folder = PATH_FIGURES / checkpoint_name / split / "score-global"
+    folder = PATH_ANALYSIS / split / checkpoint_name / "score-global"
     folder.mkdir(parents=True, exist_ok=True)
 
     tops = [0, *LAYERS]
@@ -646,12 +657,11 @@ def plot_score_global(
 
         # Metric | Below the lead times of the last row
         fig.text(0.5, -0.2 / size[1], _metric("skill"), ha="center", va="top", fontsize=_FS["fs_suptitle"], fontweight="bold")
-        fig.savefig(folder / f"sg-{group}.pdf", bbox_inches="tight")
-        plt.close(fig)
+        _save(fig, folder / f"sg-{group}.pdf", bbox_inches="tight")
 
 
 def log_figures(checkpoint_name: str, split: str, config_wandb: dict) -> None:
-    r"""Log the figures, rendered as images, and the animations of the diagnostics of a split to Weights & Biases.
+    r"""Log the figures, as images, and the animations of the diagnostics of a split to Weights & Biases.
 
     Arguments:
         checkpoint_name : Name of the checkpoint in PATH_MODELS.
@@ -659,21 +669,12 @@ def log_figures(checkpoint_name: str, split: str, config_wandb: dict) -> None:
         config_wandb    : Weights & Biases entity, project and mode.
     """
 
-    folder = PATH_FIGURES / checkpoint_name / split
+    folder = PATH_ANALYSIS / split / checkpoint_name
     wandb.init(**config_wandb, name=f"{checkpoint_name}-{split}", job_type="diagnostics")
 
-    # Media | Keyed by their path in the folder of the figures, the PDF rendered as PNG
-    media = {}
-    with tempfile.TemporaryDirectory() as tmp:
-        for path in sorted(folder.rglob("*.pdf")):
-            key = path.relative_to(folder).with_suffix("").as_posix()
-            png = Path(tmp) / key.replace("/", "-")
-            subprocess.run(["pdftoppm", "-png", "-r", "150", "-singlefile", str(path), str(png)], check=True)
-            media[key] = wandb.Image(f"{png}.png")
-
-        for path in sorted(folder.rglob("*.gif")):
-            media[path.relative_to(folder).with_suffix("").as_posix()] = wandb.Video(str(path), format="gif")
-
-        wandb.log(media)
+    # Media | Keyed by their path in the folder of the figures
+    media = {path.relative_to(folder).with_suffix("").as_posix(): wandb.Image(str(path)) for path in sorted(folder.rglob("*.png"))}
+    media |= {path.relative_to(folder).with_suffix("").as_posix(): wandb.Video(str(path), format="gif") for path in sorted(folder.rglob("*.gif"))}
+    wandb.log(media)
 
     wandb.finish()

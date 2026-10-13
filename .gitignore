@@ -4,9 +4,9 @@
 *.zarr
 .dawgz/
 cluster/*
-experiments/forecast/.dawgz/
-experiments/forecast/figures/
-experiments/forecast/wandb/
+experiments/*/.dawgz/
+experiments/*/wandb/
+experiments/analysis/
 logs/*.err
 logs/*.log
 notebooks/*.ipynb

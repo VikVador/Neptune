@@ -11,7 +11,7 @@ __all__ = [
     "PATH_MODELS",
     "PATH_PATHS",
     "PATH_DIAGNOSTICS",
-    "PATH_FIGURES",
+    "PATH_ANALYSIS",
     "PATH_GRID_U",
     "PATH_GRID_V",
     "PATH_GRID_W",
@@ -49,7 +49,7 @@ PATH_DATASETS    = PATH_NEP_PROJECT / "datasets"
 PATH_MODELS      = PATH_NEP_PROJECT / "models"
 PATH_PATHS       = PATH_NEP_PROJECT / "paths"
 PATH_DIAGNOSTICS = PATH_NEP_SCRATCH / "diagnostics"
-PATH_FIGURES     = Path(__file__).parents[2] / "experiments" / "forecast" / "figures"
+PATH_ANALYSIS    = Path(__file__).parents[2] / "experiments" / "analysis"
 
 # ----- Others
 #
