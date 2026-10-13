@@ -1,0 +1,77 @@
+WandB:
+  "entity"  : ["neptuneAI"]
+  "project" : ["neptune-diagnostics"]
+  "mode"    : ["online"]
+
+Cluster:
+  "metrics":
+    "account"   : ["bsmfc"]
+    "partition" : ["gpu"]
+    "time"      : ["00:30:00"]
+    "cpus"      : [4]
+    "gpus"      : [1]
+    "ram"       : ["32GB"]
+
+  "forecasts":
+    "account"   : ["bsmfc"]
+    "partition" : ["debug-gpu"]
+    "time"      : ["02:00:00"]
+    "cpus"      : [8]
+    "gpus"      : [1]
+    "ram"       : ["60GB"]
+
+  "figures":
+    "account"   : ["bsmfc"]
+    "partition" : ["batch"]
+    "time"      : ["01:00:00"]
+    "cpus"      : [1]
+    "ram"       : ["16GB"]
+
+  "cleanup":
+    "account"   : ["bsmfc"]
+    "partition" : ["batch"]
+    "time"      : ["00:15:00"]
+    "cpus"      : [1]
+    "ram"       : ["2GB"]
+
+Model:
+  "checkpoint_name" : [null]
+
+Evaluation:
+  "split"                : ["validation"]
+  "days"                 : [10]
+  "members"              : [64]
+  "chunk"                : [4]
+  "stride"               : [1]
+  "dates_per_job"        : [2]
+  "noise_forcing"        : [false]
+  "noise_forcing_levels" : [[
+    0.0,
+    0.025,
+    0.05,
+    0.05,
+    0.05,
+    0.05,
+    0.05,
+    0.05,
+    0.05,
+    0.05]]
+
+Animations:
+  "sections"   : [3]
+  "duration"   : [1.5]
+  "levels"     : [[0, 24, 47]]
+  "dates"      : [[
+    "2020-01-01",
+    "2020-02-01",
+    "2020-03-01",
+    "2020-04-01",
+    "2020-05-01",
+    "2020-06-01",
+    "2020-07-01",
+    "2020-08-01",
+    "2020-09-01",
+    "2020-10-01",
+    "2020-11-01",
+    "2020-12-01"
+    ]]

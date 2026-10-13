@@ -1,6 +1,6 @@
 WandB:
     "entity"  : ["neptuneAI"]
-    "project" : ["neptune-training-debug"]
+    "project" : ["neptune-training-forecast-debug"]
     "mode"    : ["disabled"]
 
 Cluster:
@@ -39,12 +39,14 @@ Model:
     "config_surface":
         "hid_channels"  : [[4, 8, 16, 32, 32]]
         "hid_blocks"    : [[1, 1, 1, 1, 1]]
+        "hid_groups"    : [[0, 0, 0, 0, 0]]
         "stride"        : [2]
         "checkpointing" : [true]
 
     "config_ocean":
         "hid_channels"  : [[4, 8, 16, 32, 32]]
         "hid_blocks"    : [[1, 1, 1, 1, 1]]
+        "hid_groups"    : [[0, 0, 0, 0, 0]]
         "stride"        : [2]
         "checkpointing" : [true]
 
