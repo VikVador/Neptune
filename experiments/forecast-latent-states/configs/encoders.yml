@@ -1,6 +1,6 @@
 WandB:
     "entity"  : ["neptuneAI"]
-    "project" : ["neptune-training-latent"]
+    "project" : ["neptune-training-latent-encoder"]
     "mode"    : ["online"]
 
 Cluster:
@@ -18,19 +18,19 @@ State:
     "checkpoint_name_ocean"   : [null]
 
 Training:
-    "batch_size_per_step_surface" : [4096]
+    "batch_size_per_step_surface" : [1024]
     "batch_size_per_step_ocean"   : [1024]
-    "batch_size_per_gpu_surface"  : [256]
+    "batch_size_per_gpu_surface"  : [64]
     "batch_size_per_gpu_ocean"    : [8]
-    "steps_update"                : [20480]
+    "steps_update"                : [25600]
     "steps_logging"               : [16]
     "steps_validation"            : [512]
     "batches_validation"          : [16]
-    "num_workers"                 : [6]
-    "prefetch_factor"             : [2]
-    "learning_rate_start"         : [0.00002]
-    "learning_rate_peak"          : [0.00080]
-    "learning_rate_end"           : [0.00001]
+    "num_workers"                 : [4]
+    "prefetch_factor"             : [1]
+    "learning_rate_start"         : [0.0002]
+    "learning_rate_peak"          : [0.0008]
+    "learning_rate_end"           : [0.0001]
     "warmup_steps"                : [512]
 
 Model:
@@ -44,7 +44,7 @@ Model:
         "kernel_size"   : [3]
         "stride"        : [2]
         "ffn_factor"    : [1]
-        "dropout"       : [0.05]
+        "dropout"       : [0.02]
         "checkpointing" : [true]
 
     "config_ocean":
@@ -54,5 +54,5 @@ Model:
         "kernel_size"   : [3]
         "stride"        : [2]
         "ffn_factor"    : [1]
-        "dropout"       : [0.05]
+        "dropout"       : [0.02]
         "checkpointing" : [true]
