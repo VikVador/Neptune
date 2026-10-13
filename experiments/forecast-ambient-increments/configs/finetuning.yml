@@ -7,10 +7,10 @@ Cluster:
     "account"       : ["bsmfc"]
     "partition"     : ["ia"]
     "time"          : ["48:00:00"]
-    "nodes"         : [2]
-    "cpus-per-node" : [64]
-    "gpus-per-node" : [8]
-    "ram-per-node"  : ["480GB"]
+    "nodes"         : [1]
+    "cpus-per-node" : [32]
+    "gpus-per-node" : [4]
+    "ram-per-node"  : ["240GB"]
 
 State:
     "saving"          : [true]
