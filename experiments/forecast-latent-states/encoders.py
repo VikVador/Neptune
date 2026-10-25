@@ -1,4 +1,4 @@
-r"""Launch the trainings of the deterministic surface and ocean encoders, preserving the geometry of the states."""
+r"""Launch the training of the deterministic encoder of a group of variables, preserving the geometry of its states."""
 
 import argparse
 import cloudpickle
@@ -94,7 +94,6 @@ def forward_loss(
 
 
 def training(
-    group           : str,
     config_state    : dict,
     config_training : dict,
     config_model    : dict,
@@ -104,10 +103,9 @@ def training(
     r"""Launch the training of the encoder of a group of variables.
 
     Arguments:
-        group           : Group of variables, 'surface' or 'ocean'.
-        config_state    : Saving option and checkpoint of each encoder to resume from.
-        config_training : Batch sizes of each encoder, optimizer steps and learning rate schedule.
-        config_model    : Shared latent channels and architecture of each encoder.
+        config_state    : Saving option and checkpoint to resume from.
+        config_training : Batch sizes, optimizer steps and learning rate schedule.
+        config_model    : Group of variables, latent channels and architecture of the encoder.
         config_wandb    : Weights & Biases entity, project and mode.
         config_cluster  : Slurm resources, logged alongside the run for traceability.
     """
@@ -117,6 +115,8 @@ def training(
 
     # Prevent xarray/dask deadlocks inside DataLoader workers
     dask.config.set(scheduler="synchronous")
+
+    group = config_model["group"]
 
     (
         saving,
@@ -135,13 +135,13 @@ def training(
         warmup_steps,
     ) = (
         config_state["saving"],
-        config_state[f"checkpoint_name_{group}"],
+        config_state["checkpoint_name"],
         config_training["steps_update"],
         config_training["steps_logging"],
         config_training["steps_validation"],
         config_training["batches_validation"],
-        config_training[f"batch_size_per_step_{group}"],
-        config_training[f"batch_size_per_gpu_{group}"],
+        config_training["batch_size_per_step"],
+        config_training["batch_size_per_gpu"],
         config_training["num_workers"],
         config_training["prefetch_factor"],
         config_training["learning_rate_start"],
@@ -153,8 +153,8 @@ def training(
     # Security
     assert batch_size_per_gpu > 1, f"ERROR - The GME loss pairs the samples of a GPU, batch_size_per_gpu must be > 1, got {batch_size_per_gpu}."
 
-    # Model | Loading a checkpoint or building from scratch
-    config        = {"lat_channels": config_model["lat_channels"], **config_model[f"config_{group}"]}
+    # Model | Loading a checkpoint or building from scratch, the group selecting the class of the encoder
+    config        = {key: value for key, value in config_model.items() if key != "group"}
     model, config = _build_model(group, config, checkpoint_name, device)
 
     # Weights & Biases | Run named after the architecture
@@ -320,13 +320,13 @@ def training(
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Launch the trainings of the latent encoders.")
+    parser = argparse.ArgumentParser(description="Launch the training of the encoder of a group of variables.")
     parser.add_argument(
         "--config",
         "-c",
         type=str,
         required=True,
-        help="Path to the training .yml configuration file.",
+        help="Path to the .yml configuration of the encoder, e.g. configs/encoder/encoder-ocean.yml.",
     )
 
     parser.add_argument(
@@ -340,28 +340,29 @@ if __name__ == "__main__":
 
     args           = parser.parse_args()
     config         = load_configuration(args.config)[0]
-    config_wandb   = config["WandB"]
     config_cluster = config["Cluster"]
-    groups         = list(ENCODERS)
 
     nodes         = config_cluster["nodes"]
     gpus_per_node = config_cluster["gpus-per-node"]
     cpus_per_node = config_cluster["cpus-per-node"]
     ram_per_node  = config_cluster["ram-per-node"]
 
+    def launch() -> None:
+        r"""Train the encoder of the configuration."""
+
+        training(
+            config_state    = config["State"],
+            config_training = config["Training"],
+            config_model    = config["Model"],
+            config_wandb    = config["WandB"],
+            config_cluster  = config_cluster,
+        )
+
     # Local
     if args.backend == "async":
-        for group in groups:
-            training(
-                group           = group,
-                config_state    = config["State"],
-                config_training = config["Training"],
-                config_model    = config["Model"],
-                config_wandb    = config_wandb,
-                config_cluster  = config_cluster,
-            )
+        launch()
 
-    # Cluster | One job per encoder, with the same resources
+    # Cluster
     else:
 
         # Freeze modules to avoid pickling issues
@@ -388,8 +389,9 @@ if __name__ == "__main__":
         else:
             interpreter = f"torchrun --nnodes 1 --nproc-per-node {gpus_per_node} --standalone"
 
-        @job(
-            array     = len(groups),
+        train = job(
+            launch,
+            name      = "train",
             nodes     = nodes,
             gpus      = gpus_per_node,
             cpus      = cpus_per_node,
@@ -398,21 +400,10 @@ if __name__ == "__main__":
             account   = config_cluster["account"],
             partition = config_cluster["partition"],
         )
-        def train(i: int) -> None:
-            r"""Train the encoder of the i-th group of variables."""
-
-            training(
-                group           = groups[i],
-                config_state    = config["State"],
-                config_training = config["Training"],
-                config_model    = config["Model"],
-                config_wandb    = config_wandb,
-                config_cluster  = config_cluster,
-            )
 
         schedule(
             train,
-            name="NEPT-ENC",
+            name=f"NEPT-ENC-{config['Model']['group'].upper()}",
             backend="slurm",
             interpreter=interpreter,
             export="ALL",

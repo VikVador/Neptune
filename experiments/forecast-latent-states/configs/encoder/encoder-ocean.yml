@@ -1,0 +1,45 @@
+WandB:
+    "entity"  : ["sail-nyu"]
+    "project" : ["neptune-training-encoders"]
+    "mode"    : ["online"]
+
+Cluster:
+    "account"       : ["bsmfc"]
+    "partition"     : ["gpu"]
+    "time"          : ["48:00:00"]
+    "nodes"         : [1]
+    "cpus-per-node" : [32]
+    "gpus-per-node" : [4]
+    "ram-per-node"  : ["240GB"]
+
+State:
+    "saving"          : [true]
+    "checkpoint_name" : [null]
+
+Training:
+    "batch_size_per_step" : [16]
+    "batch_size_per_gpu"  : [4]
+    "batches_validation"  : [4]
+    "steps_update"        : [45056]
+    "steps_logging"       : [4]
+    "steps_validation"    : [32]
+    "num_workers"         : [4]
+    "prefetch_factor"     : [1]
+    "warmup_steps"        : [1024]
+    "learning_rate_start" : [0.00005]
+    "learning_rate_peak"  : [0.00020]
+    "learning_rate_end"   : [0.00001]
+
+Model:
+    "group"         : ["ocean"]
+    "checkpointing" : [true]
+    "dropout"       : [0.02]
+    "kernel_size"   : [3]
+    "lat_channels"  : [128]
+    "hid_channels"  : [[16, 64, 128, 256]]
+    "hid_blocks"    : [[3, 3, 3, 3]]
+    "stride"        : [[
+        [2, 2, 2],
+        [2, 2, 2],
+        [2, 2, 2],
+    ]]
