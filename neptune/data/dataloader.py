@@ -4,12 +4,23 @@ __all__ = [
     "get_dataloaders",
 ]
 
+import ctypes
+
 from collections.abc import Iterator, Sequence
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from typing import Any
 
 from neptune.data.dataset import get_datasets
+
+
+def _init_worker(worker_id: int) -> None:
+    r"""Serve the large arrays of a worker with mmap, such that they are returned to the system once freed.
+
+    Arguments:
+        worker_id : Index of the worker.
+    """
+    ctypes.CDLL("libc.so.6").mallopt(-3, 2**16)
 
 
 def infinite_dataloader(
@@ -113,6 +124,7 @@ def get_dataloaders(
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
             pin_memory=True,
             persistent_workers=num_workers > 0,
+            worker_init_fn=_init_worker,
             drop_last=True,
         )
         dataloaders.append(dataloader)
