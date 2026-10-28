@@ -1,0 +1,119 @@
+#!/bin/bash
+# claude-phone: keep a Claude Code Remote Control session alive in tmux on a cluster login node,
+# to drive it from the Claude mobile app or claude.ai/code. See .claude/claude-phone.md of the project.
+set -euo pipefail
+
+SESSION="claude"
+PROJECT_DIR="${CLAUDE_PHONE_DIR:-$HOME/neptune}"
+PROJECT_NAME="$(basename "$PROJECT_DIR")"
+MODE="${CLAUDE_PHONE_MODE:-acceptEdits}"
+
+# The tmux socket lives in the home directory, named after the node: the cleaning of /tmp can no longer
+# make the session unreachable, and the socket files tell on which node a session was started.
+SOCKET_DIR="$HOME/.tmux"
+SOCKET="$SOCKET_DIR/claude-phone-$(hostname -s).sock"
+
+tm() {
+    tmux -S "$SOCKET" "$@"
+}
+
+usage() {
+    echo "Usage: claude-phone [start|stop|status]"
+    echo "  start  (default) Start the Remote Control session in tmux and attach to it."
+    echo "  stop             Kill the tmux session."
+    echo "  status           Tell whether the session runs on this node."
+}
+
+resolve_cli() {
+    # Standalone CLI first, otherwise the latest binary bundled with the VSCode extension.
+    if command -v claude > /dev/null; then
+        command -v claude
+        return
+    fi
+    local bundled
+    bundled=$(ls -d "$HOME"/.vscode-server/extensions/anthropic.claude-code-*/resources/native-binary/claude 2> /dev/null | sort -V | tail -n 1 || true)
+    if [[ -n "$bundled" ]]; then
+        echo "$bundled"
+        return
+    fi
+    echo "claude-phone: Claude Code CLI not found, install it with:" >&2
+    echo "  curl -fsSL https://claude.ai/install.sh | bash" >&2
+    return 1
+}
+
+run_loop() {
+    # Runs inside tmux. The first run creates the named session, the next ones reattach to it with -c,
+    # which only works within about 4 h, hence at most 480 retries of 30 s.
+    local cli=$1 name=$2 mode=$3
+    local first=1 failures=0 status
+    while (( failures < 480 )); do
+        if (( first )); then
+            nice -n 10 "$cli" remote-control --name "$name" --permission-mode "$mode" && status=0 || status=$?
+        else
+            nice -n 10 "$cli" remote-control -c && status=0 || status=$?
+        fi
+        first=0
+        if (( status == 0 || status == 130 )); then
+            return
+        fi
+        failures=$(( failures + 1 ))
+        echo "claude remote-control exited with code $status, restarting in 30 s (Ctrl+C to stop)."
+        sleep 30
+    done
+    echo "claude-phone: gave up after $failures failures, run 'claude-phone stop' then 'claude-phone start'."
+    sleep infinity
+}
+
+start() {
+    local cli
+    cli=$(resolve_cli)
+    if ! tm has-session -t "$SESSION" 2> /dev/null; then
+        mkdir -p "$SOCKET_DIR" && chmod 700 "$SOCKET_DIR"
+        rm -f "$SOCKET"
+        local threads="export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 CLAUDE_PHONE=1"
+        local call
+        call="run_loop $(printf '%q ' "$cli" "$PROJECT_NAME" "$MODE")"
+        tm new-session -d -s "$SESSION" -c "$PROJECT_DIR" bash -c "$threads; $(declare -f run_loop); $call"
+        echo "Started '$SESSION' on $(hostname -s) in $PROJECT_DIR (mode $MODE)."
+    fi
+    tm attach -t "$SESSION"
+}
+
+stop() {
+    if tm has-session -t "$SESSION" 2> /dev/null; then
+        tm kill-session -t "$SESSION"
+        echo "Stopped '$SESSION' on $(hostname -s)."
+    else
+        echo "No '$SESSION' session on $(hostname -s)."
+        other_nodes
+    fi
+    rm -f "$SOCKET"
+}
+
+status() {
+    if tm has-session -t "$SESSION" 2> /dev/null; then
+        echo "'$SESSION' is running on $(hostname -s)."
+    else
+        echo "'$SESSION' is not running on $(hostname -s)."
+        other_nodes
+    fi
+}
+
+other_nodes() {
+    # tmux is per node: a session started on another login node can only be reached from that node.
+    local socket node
+    for socket in "$SOCKET_DIR"/claude-phone-*.sock; do
+        [[ -e "$socket" && "$socket" != "$SOCKET" ]] || continue
+        node=$(basename "$socket" .sock)
+        node=${node#claude-phone-}
+        echo "A session was started on $node: run 'ssh $node' then 'claude-phone status' (or stop)."
+    done
+}
+
+case "${1:-start}" in
+    start)          start ;;
+    stop)           stop ;;
+    status)         status ;;
+    -h|--help|help) usage ;;
+    *)              usage >&2; exit 2 ;;
+esac
