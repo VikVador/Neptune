@@ -14,9 +14,11 @@ scripts/.dawgz/
 scripts/wandb/
 wandb/
 
-# Claude
-CLAUDE.md
+# Claude (instruction files and phone scripts tracked, the rest stays local)
 .claude/*
+!.claude/claude-*.md
+!.claude/phone/
+!.claude/phone/*.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
