@@ -1,22 +1,22 @@
 # Project
 *.DS_Store
-*.sh
+*.ext3
+*.sif
+*.sqf
 *.zarr
 .dawgz/
-cluster/*
-experiments/*/.dawgz/
+cluster/logs/*
+!cluster/logs/.gitkeep
 experiments/*/wandb/
-experiments/analysis/
-logs/*.err
-logs/*.log
-notebooks/*.ipynb
-scripts/.dawgz/
-scripts/wandb/
+experiments/analysis/*
+!experiments/analysis/.gitkeep
 wandb/
 
-# Claude
-CLAUDE.md
+# Claude (instruction files and phone scripts tracked, the rest stays local)
 .claude/*
+!.claude/claude-*.md
+!.claude/phone/
+!.claude/phone/*.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
