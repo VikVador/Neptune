@@ -1,15 +1,12 @@
-r"""Launch the trainings of the deterministic surface and ocean encoders, preserving the geometry of the states."""
+r"""Launch the training of the deterministic encoder of a group of variables, preserving the geometry of its states."""
 
 import argparse
-import cloudpickle
 import dask
 import math
-import secrets
 import torch
 import torch.distributed as dist
 import wandb
 
-from dawgz import job, schedule
 from omegaconf import OmegaConf
 from shaggy.loss import loss_geometry_embedding
 from shaggy.optimizers.gradients import safe_gradient_step
@@ -18,13 +15,24 @@ from shaggy.tools import load, load_config, save
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+import neptune.data
+import neptune.data.dataloader
+import neptune.data.dataset
+import neptune.data.weights
+import neptune.model.encoders
+
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_conditioning
 from neptune.distributed import reduce_mean, setup_distributed
 from neptune.model.encoders import LatentEncoder, OceanEncoder, SurfaceEncoder
 from neptune.schedulers import warmup_cosine_decay
-from neptune.tools import extract_model_hash, get_wandb_hyperparameters, load_configuration
+from neptune.tools import (
+    generate_run_name,
+    get_wandb_hyperparameters,
+    load_configuration,
+    schedule_training,
+)
 
 # fmt: off
 #
@@ -81,7 +89,7 @@ def forward_loss(
 
     x_inp_s, x_inp_o, _, _, c_inp, dates = batch
 
-    # States | Encoded with their conditioning, the date and ERA5 at the surface, the date in the ocean (the collate transposes the dates)
+    # The states are encoded with their conditioning: the date and ERA5 at the surface, the date in the ocean (the collate transposes the dates)
     cond_s, cond_o = get_weights_conditioning(dates[0], c_inp[:, 0], device=device)
     states, cond   = (x_inp_s[:, 0], cond_s) if group == "surface" else (x_inp_o[:, 0], cond_o)
     states         = states.to(device)
@@ -89,12 +97,11 @@ def forward_loss(
     with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
         z = model(torch.cat([states, cond], dim=1))
 
-    # Loss | Geometry of the states only, the conditioning being an input of the encoder
+    # The loss only compares the geometry of the states, the conditioning being an input of the encoder
     return loss_geometry_embedding(states, z.float())
 
 
 def training(
-    group           : str,
     config_state    : dict,
     config_training : dict,
     config_model    : dict,
@@ -104,10 +111,9 @@ def training(
     r"""Launch the training of the encoder of a group of variables.
 
     Arguments:
-        group           : Group of variables, 'surface' or 'ocean'.
-        config_state    : Saving option and checkpoint of each encoder to resume from.
-        config_training : Batch sizes of each encoder, optimizer steps and learning rate schedule.
-        config_model    : Shared latent channels and architecture of each encoder.
+        config_state    : Saving option and checkpoint to resume from.
+        config_training : Batch sizes, optimizer steps and learning rate schedule.
+        config_model    : Group of variables, latent channels and architecture of the encoder.
         config_wandb    : Weights & Biases entity, project and mode.
         config_cluster  : Slurm resources, logged alongside the run for traceability.
     """
@@ -117,6 +123,8 @@ def training(
 
     # Prevent xarray/dask deadlocks inside DataLoader workers
     dask.config.set(scheduler="synchronous")
+
+    group = config_model["group"]
 
     (
         saving,
@@ -135,13 +143,13 @@ def training(
         warmup_steps,
     ) = (
         config_state["saving"],
-        config_state[f"checkpoint_name_{group}"],
+        config_state["checkpoint_name"],
         config_training["steps_update"],
         config_training["steps_logging"],
         config_training["steps_validation"],
         config_training["batches_validation"],
-        config_training[f"batch_size_per_step_{group}"],
-        config_training[f"batch_size_per_gpu_{group}"],
+        config_training["batch_size_per_step"],
+        config_training["batch_size_per_gpu"],
         config_training["num_workers"],
         config_training["prefetch_factor"],
         config_training["learning_rate_start"],
@@ -153,14 +161,12 @@ def training(
     # Security
     assert batch_size_per_gpu > 1, f"ERROR - The GME loss pairs the samples of a GPU, batch_size_per_gpu must be > 1, got {batch_size_per_gpu}."
 
-    # Model | Loading a checkpoint or building from scratch
-    config        = {"lat_channels": config_model["lat_channels"], **config_model[f"config_{group}"]}
+    # The model is loaded from a checkpoint or built from scratch, the group selecting the class of the encoder
+    config        = {key: value for key, value in config_model.items() if key != "group"}
     model, config = _build_model(group, config, checkpoint_name, device)
 
-    # Weights & Biases | Run named after the architecture
-    run_name = f"ENC_{group}_lc{model.lat_channels}_tk{model.tokens}__{secrets.token_hex(2).upper()}"
-    if checkpoint_name is not None:
-        run_name = f"{run_name}_{extract_model_hash(checkpoint_name)}"
+    # The Weights & Biases run is named after the architecture
+    run_name = generate_run_name(f"ENC_{group}_lc{model.lat_channels}_tk{model.tokens}", checkpoint_name)
 
     if rank == 0:
         wandb.init(
@@ -189,7 +195,7 @@ def training(
         None,
     ]
 
-    # Data | Single states of the group only, with the conditioning of their date
+    # Each sample is a single state of the group, with the conditioning of its date
     dataloader_training, dataloader_validation, _ = get_dataloaders(
         batch_size      = batch_size_per_gpu,
         num_workers     = num_workers,
@@ -205,7 +211,7 @@ def training(
         group           = group,
     )
 
-    # Model | Masks and meshes are identical on every process, no need to broadcast them
+    # Masks and meshes are identical on every process, so they are not broadcast
     if is_distributed:
         ddp_kwargs = {"device_ids": [local_rank], "output_device": local_rank} if device.type == "cuda" else {}
         model      = DDP(model, broadcast_buffers=False, gradient_as_bucket_view=True, **ddp_kwargs)
@@ -320,13 +326,13 @@ def training(
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Launch the trainings of the latent encoders.")
+    parser = argparse.ArgumentParser(description="Launch the training of the encoder of a group of variables.")
     parser.add_argument(
         "--config",
         "-c",
         type=str,
         required=True,
-        help="Path to the training .yml configuration file.",
+        help="Path to the .yml configuration of the encoder, e.g. configs/encoder/encoder-ocean.yml.",
     )
 
     parser.add_argument(
@@ -340,80 +346,34 @@ if __name__ == "__main__":
 
     args           = parser.parse_args()
     config         = load_configuration(args.config)[0]
-    config_wandb   = config["WandB"]
     config_cluster = config["Cluster"]
-    groups         = list(ENCODERS)
 
-    nodes         = config_cluster["nodes"]
-    gpus_per_node = config_cluster["gpus-per-node"]
-    cpus_per_node = config_cluster["cpus-per-node"]
-    ram_per_node  = config_cluster["ram-per-node"]
+    def train() -> None:
+        r"""Train the encoder of the configuration."""
+
+        training(
+            config_state    = config["State"],
+            config_training = config["Training"],
+            config_model    = config["Model"],
+            config_wandb    = config["WandB"],
+            config_cluster  = config_cluster,
+        )
 
     # Local
     if args.backend == "async":
-        for group in groups:
-            training(
-                group           = group,
-                config_state    = config["State"],
-                config_training = config["Training"],
-                config_model    = config["Model"],
-                config_wandb    = config_wandb,
-                config_cluster  = config_cluster,
-            )
+        train()
 
-    # Cluster | One job per encoder, with the same resources
+    # Cluster
     else:
-
-        # Freeze modules to avoid pickling issues
-        import neptune.data
-        import neptune.data.dataloader
-        import neptune.data.dataset
-        import neptune.data.weights
-        import neptune.model.encoders
-        for _mod in [
-            neptune.data,
-            neptune.data.dataset,
-            neptune.data.weights,
-            neptune.data.dataloader,
-            neptune.model.encoders,
-        ]:
-            cloudpickle.register_pickle_by_value(_mod)
-
-        if nodes > 1:
-            interpreter = (
-                f"torchrun --nnodes {nodes} --nproc-per-node {gpus_per_node} "
-                f"--rdzv_backend=c10d --rdzv_endpoint=$SLURMD_NODENAME:$((20000 + SLURM_JOB_ID % 10000)) "
-                f"--rdzv_id=$SLURM_JOB_ID"
-            )
-        else:
-            interpreter = f"torchrun --nnodes 1 --nproc-per-node {gpus_per_node} --standalone"
-
-        @job(
-            array     = len(groups),
-            nodes     = nodes,
-            gpus      = gpus_per_node,
-            cpus      = cpus_per_node,
-            ram       = ram_per_node,
-            time      = config_cluster["time"],
-            account   = config_cluster["account"],
-            partition = config_cluster["partition"],
-        )
-        def train(i: int) -> None:
-            r"""Train the encoder of the i-th group of variables."""
-
-            training(
-                group           = groups[i],
-                config_state    = config["State"],
-                config_training = config["Training"],
-                config_model    = config["Model"],
-                config_wandb    = config_wandb,
-                config_cluster  = config_cluster,
-            )
-
-        schedule(
+        schedule_training(
             train,
-            name="NEPT-ENC",
-            backend="slurm",
-            interpreter=interpreter,
-            export="ALL",
+            name           = f"NEPT-ENC-{config['Model']['group'].upper()}",
+            config_cluster = config_cluster,
+            modules        = [
+                neptune.data,
+                neptune.data.dataset,
+                neptune.data.weights,
+                neptune.data.dataloader,
+                neptune.model.encoders,
+            ],
         )

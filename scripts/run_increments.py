@@ -93,7 +93,7 @@ if __name__ == "__main__":
     samples     = 1024
     num_workers = 7
 
-    # Visualization partition | Maximum resources of a single job (1 GPU is mandatory)
+    # Maximum resources of a single job on the visualization partition (1 GPU is mandatory)
     @job(
         cpus      = 8,
         gpus      = 1,
