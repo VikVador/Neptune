@@ -83,7 +83,7 @@ def forecast_ensemble(
 
     device = fgn.mask_surface.device
 
-    # Conditioning | A single noisy ERA5 per step, shared by every member, diversified by the noise of the FGN
+    # A single noisy ERA5 per step is shared by every member, the members being diversified by the noise of the FGN
     conditionings = [
         get_weights_conditioning([date], c_inp[k : k + 1], noise=noise[k], device=device)
         for k, date in enumerate(dates)
@@ -109,7 +109,7 @@ def forecast_ensemble(
 
             yield k, y_s[:, 0], y_o[:, 0]
 
-            # Sliding window | Oldest state out, forecast in
+            # The window slides by one day: the oldest state goes out, the forecast comes in
             x_s, x_o = torch.cat([x_s[:, 1:], y_s], dim=1), torch.cat([x_o[:, 1:], y_o], dim=1)
 
 
@@ -173,7 +173,7 @@ def compute_metrics(
             x_inp_s[-1].to(device), x_inp_o[-1].to(device)
         )
 
-        # Ensemble | Sums over the members of the errors of each day and of their squares, on the CPU, by chunks of members
+        # The errors of each day and their squares are summed over the members, on the CPU, by chunks of members
         sums = [None] * days
         for k, x_s, x_o in forecast_ensemble(
             fgn, x_inp_s, x_inp_o, c_inp, dates[n - 1 : -1], members, chunk, noise
@@ -193,7 +193,7 @@ def compute_metrics(
             clim_s, clim_o = _climatology(dates[n + k], device)
             e_s, e_o, q_s, q_o = (t.to(device) for t in sums[k])
 
-            # Fields | Squared errors and variance of the ensemble at each point, NaN on land
+            # Squared errors and variance of the ensemble at each point, NaN on land
             fields = {
                 ("forecast", "mse"): (
                     apply_mask((e_s / members) ** 2, mask_s),
@@ -215,13 +215,13 @@ def compute_metrics(
                 )
             }
 
-            # Metrics | Averaged over the sea, per variable and level
+            # The metrics are averaged over the sea, per variable and level
             for key, (s, o) in fields.items():
                 metrics.setdefault(key, ([], []))
                 metrics[key][0].append(s.nanmean(dim=(-2, -1)))
                 metrics[key][1].append(o.nanmean(dim=(-2, -1)))
 
-            # Maps | At the surface and averaged along each axis of the ocean, summed over the windows
+            # The maps are kept at the surface and averaged along each axis of the ocean, then summed over the windows
             if k in (0, days - 1):
                 (mse_s, mse_o), (var_s, var_o) = (
                     fields[("forecast", "mse")],
@@ -344,7 +344,7 @@ def compute_animations(
     x_inp_s, x_inp_o, x_out_s, x_out_o, c_inp, dates = dataset[index]
     truth_s, truth_o = dataset.unstandardize(x_out_s.to(device), x_out_o.to(device))
 
-    # Slices | Surface variables (position None), ocean variables at each level, longitude and latitude
+    # Slices of the surface variables (position None), and of the ocean variables at each level, longitude and latitude
     columns, rows = _sections(sections)
     slices = [(var, c, "x-y", None) for c, var in enumerate(DATASET_VARIABLES_SURFACE)]
     for plane, positions in (("x-y", levels), ("y-z", columns), ("z-x", rows)):
@@ -352,7 +352,7 @@ def compute_animations(
             (var, c, plane, p) for c, var in enumerate(DATASET_VARIABLES_OCEAN) for p in positions
         ]
 
-    # Ensemble | Slices of every member and day, gathered on the CPU by chunks of members
+    # The slices of every member and day are gathered on the CPU by chunks of members
     gathered = {(var, plane, p): [[] for _ in range(days)] for var, _, plane, p in slices}
     for k, x_s, x_o in forecast_ensemble(
         fgn, x_inp_s, x_inp_o, c_inp, dates[n - 1 : -1], members, chunk, noise
@@ -361,7 +361,7 @@ def compute_animations(
         for var, c, plane, p in slices:
             gathered[(var, plane, p)][k].append(_cut(x_s, x_o, c, plane, p).cpu())
 
-    # Frames | Ground truth, ensemble mean and median, 8 members and skills of each day, NaN on land
+    # Each frame holds the ground truth, the ensemble mean and median, 8 members and the skills of the day, NaN on land
     nan = float("nan")
     frames = {}
     for var, c, plane, p in slices:
@@ -385,7 +385,7 @@ def compute_animations(
             key: torch.stack([step[key] for step in steps]) for key in steps[0]
         }
 
-    # Saving | One file per variable, the frames of each slice stacked along the days
+    # One file per variable, the frames of each slice being stacked along the days
     folder = PATH_DIAGNOSTICS / checkpoint_name / split / "animations" / dates[n - 1]
     folder.mkdir(parents=True, exist_ok=True)
     for var in DATASET_VARIABLES_SURFACE + DATASET_VARIABLES_OCEAN:
@@ -434,7 +434,7 @@ def aggregate_metrics(
     paths = sorted((PATH_DIAGNOSTICS / checkpoint_name / split / "metrics").glob("*.pt"))
     files = [torch.load(path, weights_only=True) for path in paths]
 
-    # Layers | Weights of the levels of each layer, by their number of sea points (Z, L)
+    # Each layer weights its levels by their number of sea points (Z, L)
     _, mask_o = get_weights_mask()
     layers = torch.as_tensor(np.digitize(load_depth(), LAYERS))
     weights = mask_o[0].sum(dim=(-2, -1))[:, None] * torch.nn.functional.one_hot(

@@ -254,13 +254,12 @@ def animate_forecast(
     lon, lat = load_grid()
     depth = load_depth()
 
-    # Sections | Horizontal coordinate of the slice (latitude or longitude), with the aspect of the maps
+    # The horizontal coordinate of the slice (latitude or longitude) sets the aspect of the maps
     coords = lat[:, 0] if plane == "y-z" else lon[0]
     aspect = (lat.max() - lat.min()) / (lon.max() - lon.min())
 
-    # Figure | Ground truth, ensemble mean and median on top, members below (4 per row), shared colorbar,
-    #          with heights in inches : rows of maps (geographic aspect) separated by gaps, the last one
-    #          leaving room for the longitudes, then the colorbar
+    # Ground truth, ensemble mean and median on top, members below (4 per row), then a shared colorbar, the rows
+    # of maps (heights in inches) being separated by gaps, with room for the longitudes below the last one
     rows = 1 + -(-members // 4)
     heights = [1.25, 0.25] * (rows - 1) + [1.25, 0.45, 0.12]
     height = sum(heights) + 1.05
@@ -273,7 +272,7 @@ def animate_forecast(
     for i, (title, row, col) in enumerate(panels):
         cell = grid[2 * row, col]
 
-        # Coordinates | Latitudes or depths on the first column, longitudes or latitudes on the last row
+        # Latitudes or depths are labelled on the first column, longitudes or latitudes on the last row
         if plane == "x-y":
             ax = fig.add_subplot(cell, projection=ccrs.PlateCarree())
             meshes.append(ax.pcolormesh(lon, lat, frames["truth"][0], transform=ccrs.PlateCarree(), **colors))
@@ -300,14 +299,14 @@ def animate_forecast(
     colorbar = fig.colorbar(meshes[0], cax=fig.add_subplot(grid[-1, :]), orientation="horizontal")
     colorbar.ax.tick_params(labelsize=_FS["fs_tick"])
 
-    # Members | Labelled on the right of the last column, once the maps have their geographic aspect
+    # The members are labelled on the right of the last column, once the maps have their geographic aspect
     fig.canvas.draw()
     top, bottom = axes[6].get_position(), axes[-1].get_position()
     fig.text(top.x1 + 0.01, (bottom.y0 + top.y1) / 2, "Members", rotation=-90, ha="left", va="center", fontsize=_FS["fs_title"], fontweight="bold")
 
     fig.suptitle(f"{_title(variable)} — {position} — {date}", fontsize=_FS["fs_suptitle"], fontweight="bold")
 
-    # Frames | One per forecasted day, in RGB since GIF transparency would erase the black pixels
+    # One frame per forecasted day, in RGB since the GIF transparency would erase the black pixels
     images = []
     for k in range(days):
         fields = [frames["truth"][k], frames["mean"][k], frames["median"][k], *frames["members"][k]]
@@ -359,7 +358,7 @@ def plot_animations(
     lon, lat = load_grid()
     slices = torch.load(PATH_DIAGNOSTICS / checkpoint_name / split / "animations" / date / f"{variable}.pt", weights_only=True)
 
-    # Paths and titles | Surface (surface variables and first level), depth, longitude or latitude of each slice
+    # Paths and titles of each slice: surface (surface variables and first level), depth, longitude or latitude
     for (plane, p), frames in slices.items():
         if plane == "x-y":
             surface = p in (None, 0)
@@ -491,7 +490,7 @@ def _plot_score_card(
     colorbar = fig.colorbar(image, ax=ax, location="left", pad=0.02, aspect=10 if values.ndim == 1 else 20, spacing="proportional")
     _set_colorbar(colorbar, metric, [0, 1, 2] if values.ndim == 1 else _RATIO_TICKS, _FS["fs_text"])
 
-    # Variable | Outside of the layout, to keep the same width for every column
+    # The variable is written outside of the layout, to keep the same width for every column
     if not first:
         return None
 
@@ -536,7 +535,7 @@ def plot_score_local(
         fig.get_layout_engine().set(h_pad=0.02, w_pad=0.02, hspace=0, wspace=0)
 
         names = []
-        # Columns | The last one is wider by the width of the depths, such that every panel has the same width
+        # The last column is wider by the width of the depths, such that every panel has the same width
         columns = fig.subfigures(1, 3, wspace=0.03, width_ratios=[1, 1, 1.16])
         for c, (column, metric) in enumerate(zip(columns, TRANSLATIONS_METRICS, strict=True)):
             scores, skills = ([t.numpy() for t in metrics[("forecast", name)]] for name in (metric, "skill"))
@@ -557,11 +556,11 @@ def plot_score_local(
                 ax.tick_params(axis="x", bottom=False)
             axes[-1].set_xlabel("Lead Time [days]", fontsize=_FS["fs_title"], labelpad=8)
 
-            # Metric | Column title, an arrow for the metrics to minimize and a short empty line keeping it away from the first variable
+            # Column title of the metric, with an arrow for the metrics to minimize and a short empty line before the first variable
             suffix = f" {_unit('-')}" if metric == "ratio" else ""
             column.suptitle(f"{_metric(metric)}{suffix}\n", fontsize=_FS["fs_suptitle"], fontweight="bold", linespacing=0.6)
 
-        # Saving | The names of the variables, outside of the layout, added to the default artists of the figure
+        # The names of the variables, outside of the layout, are saved with the default artists of the figure
         extra = fig.get_default_bbox_extra_artists() + [name for name in names if name is not None]
         _save(fig, folder / f"sl-{group}.pdf", bbox_inches="tight", bbox_extra_artists=extra)
 
@@ -603,7 +602,7 @@ def plot_score_global(
     layers = [f"{top}–{bottom} {_unit('m')}" for top, bottom in zip(tops, LAYERS, strict=False)] + [f"> {tops[-1]} {_unit('m')}"]
     baselines = ["forecast", *CMAPS_LINE_MODELS]
 
-    # Layout | In inches, 4 panels per row, a surface panel being as high as a layer of an ocean one
+    # Layout in inches, 4 panels per row, a surface panel being as high as one layer of an ocean panel
     width, height = _PANEL_SIZE
     space_x, space_y = _PANEL_SPACE
     for group, (surface, ocean) in _GROUPS.items():
@@ -619,7 +618,7 @@ def plot_score_global(
             top -= space_y / 2
             for c, var in enumerate(row):
 
-                # Panel | A single axes at the surface, else one per layer from the top, joined by breaks of the y axis
+                # A single axes at the surface, else one per layer from the top, joined by breaks of the y axis
                 if row is surface:
                     i = DATASET_VARIABLES_SURFACE.index(var)
                     names, curves = ["Surface"], [{b: metrics[(b, "skill")][0][:, i].numpy() for b in baselines}]
@@ -633,7 +632,7 @@ def plot_score_global(
                     lower.sharex(upper)
                     _break(upper, lower)
 
-                # Lines | The forecast on top of the baselines
+                # The forecast is drawn on top of the baselines
                 for ax, name, skills in zip(axes, names, curves, strict=True):
                     days = np.arange(1, len(skills["forecast"]) + 1)
                     for baseline, skill in reversed(skills.items()):
@@ -651,11 +650,11 @@ def plot_score_global(
 
             top -= heights[r] + space_y / 2
 
-        # Legend | On a single row above the panels
+        # The legend holds on a single row above the panels
         handles = [Line2D([], [], color=colors[b], **_LINE) for b in baselines]
         fig.legend(handles, [TRANSLATIONS_MODELS[b] for b in baselines], loc="lower center", bbox_to_anchor=(0.5, 1), ncols=len(handles), fontsize=_FS["fs_title"], frameon=False)
 
-        # Metric | Below the lead times of the last row
+        # The metric is written below the lead times of the last row
         fig.text(0.5, -0.2 / size[1], _metric("skill"), ha="center", va="top", fontsize=_FS["fs_suptitle"], fontweight="bold")
         _save(fig, folder / f"sg-{group}.pdf", bbox_inches="tight")
 
@@ -672,7 +671,7 @@ def log_figures(checkpoint_name: str, split: str, config_wandb: dict) -> None:
     folder = PATH_ANALYSIS / split / checkpoint_name
     wandb.init(**config_wandb, name=f"{checkpoint_name}-{split}", job_type="diagnostics")
 
-    # Media | Keyed by their path in the folder of the figures
+    # The media are keyed by their path in the folder of the figures
     media = {path.relative_to(folder).with_suffix("").as_posix(): wandb.Image(str(path)) for path in sorted(folder.rglob("*.png"))}
     media |= {path.relative_to(folder).with_suffix("").as_posix(): wandb.Video(str(path), format="gif") for path in sorted(folder.rglob("*.gif"))}
     wandb.log(media)

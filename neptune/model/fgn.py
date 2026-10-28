@@ -101,7 +101,7 @@ class FGN(nn.Module):
         self.lat_channels = lat_channels
         self.mod_features = mod_features
 
-        # Static inputs | Land/sea masks and sin/cos meshes, rebuilt at loading (not saved)
+        # Land/sea masks and sin/cos meshes are rebuilt at loading (not saved)
         mask_surface, mask_ocean = get_weights_mask()
         mesh_surface, mesh_ocean = get_weights_mesh()
         self.register_buffer("mask_surface", mask_surface, persistent=False)
@@ -109,21 +109,21 @@ class FGN(nn.Module):
         self.register_buffer("mesh_surface", mesh_surface, persistent=False)
         self.register_buffer("mesh_ocean", mesh_ocean, persistent=False)
 
-        # Increments | Statistics of the daily increments (standardized units), rebuilt at loading
+        # The statistics of the daily increments (standardized units) are rebuilt at loading
         mean_surface, std_surface, mean_ocean, std_ocean = get_weights_increments()
         self.register_buffer("increments_mean_surface", mean_surface, persistent=False)
         self.register_buffer("increments_std_surface", std_surface, persistent=False)
         self.register_buffer("increments_mean_ocean", mean_ocean, persistent=False)
         self.register_buffer("increments_std_ocean", std_ocean, persistent=False)
 
-        # Bounds | Physical bounds of the standardized states, rebuilt at loading
+        # The physical bounds of the standardized states are rebuilt at loading
         lower_surface, upper_surface, lower_ocean, upper_ocean = get_weights_bounds()
         self.register_buffer("lower_surface", lower_surface, persistent=False)
         self.register_buffer("upper_surface", upper_surface, persistent=False)
         self.register_buffer("lower_ocean", lower_ocean, persistent=False)
         self.register_buffer("upper_ocean", upper_ocean, persistent=False)
 
-        # Encoders and decoders | Inputs are the previous states, mask, mesh and conditioning
+        # The encoders and decoders take the previous states, the mask, the mesh and the conditioning
         channels_surface = len(DATASET_VARIABLES_SURFACE)
         channels_ocean = len(DATASET_VARIABLES_OCEAN)
         in_surface = (
@@ -149,7 +149,7 @@ class FGN(nn.Module):
             **(config_ocean or {}),
         )
 
-        # Processor | Each token is positioned by its 3 coordinates (level, latitude, longitude)
+        # Each token of the processor is positioned by its 3 coordinates (level, latitude, longitude)
         self.processor = DiT(
             in_channels=lat_channels,
             out_channels=lat_channels,
@@ -250,18 +250,18 @@ class FGN(nn.Module):
             _stack_inputs(x_inp_o, cond_o, self.mask_ocean, self.mesh_ocean), noise
         )
 
-        # Processing | Surface and ocean latents as a single sequence of tokens (B * E, T, C)
+        # The surface and ocean latents are processed as a single sequence of tokens (B * E, T, C)
         z = torch.cat([z_s.flatten(2), z_o.flatten(2)], dim=2).transpose(1, 2)
         z = self.processor(z, noise, pos=self.positions)
         z_s, z_o = z.transpose(1, 2).split(self.tokens, dim=2)
 
-        # Decoding | Standardized increments, rescaled to the increments of the states
+        # The decoders output standardized increments, rescaled to the increments of the states
         dx_s = self.ae_surface.decode(z_s.unflatten(2, self.shape_surface), noise)
         dx_o = self.ae_ocean.decode(z_o.unflatten(2, self.shape_ocean), noise)
         dx_s = self.increments_mean_surface + self.increments_std_surface * dx_s
         dx_o = self.increments_mean_ocean + self.increments_std_ocean * dx_o
 
-        # Next state | Last input state plus the increment, within physical bounds and zero on land
+        # The next state is the last input state plus the increment, within physical bounds and zero on land
         x_out_s, x_out_o = self.postprocess(x_inp_s[:, -1] + dx_s, x_inp_o[:, -1] + dx_o)
         x_out_s = x_out_s * self.mask_surface
         x_out_o = x_out_o * self.mask_ocean
@@ -310,7 +310,7 @@ class FGN(nn.Module):
             forecast_s.append(x_s.cpu())
             forecast_o.append(x_o.cpu())
 
-            # Sliding window | Oldest state out, forecast in
+            # The window slides by one day: the oldest state goes out, the forecast comes in
             x_inp_s = torch.cat([x_inp_s[:, 1:], x_s[:, None]], dim=1)
             x_inp_o = torch.cat([x_inp_o[:, 1:], x_o[:, None]], dim=1)
 
