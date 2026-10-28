@@ -1,20 +1,25 @@
 r"""Launch the fine-tuning of a pre-trained Functional Generative Network (FGN) on its own rollouts."""
 
 import argparse
-import cloudpickle
 import dask
 import math
 import torch
 import torch.distributed as dist
 import wandb
 
-from dawgz import job, schedule
 from omegaconf import OmegaConf
 from shaggy.optimizers.gradients import safe_gradient_step
 from shaggy.optimizers.soap import SOAP
 from shaggy.tools import load, load_config, save
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+import neptune.data
+import neptune.data.dataloader
+import neptune.data.dataset
+import neptune.data.weights
+import neptune.loss
+import neptune.model.fgn
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
@@ -23,7 +28,12 @@ from neptune.distributed import reduce_mean, setup_distributed
 from neptune.loss import loss_crps_rollout
 from neptune.model import FGN
 from neptune.schedulers import warmup_cosine_decay
-from neptune.tools import generate_run_name_fgn, get_wandb_hyperparameters, load_configuration
+from neptune.tools import (
+    generate_run_name,
+    get_wandb_hyperparameters,
+    load_configuration,
+    schedule_training,
+)
 
 
 # fmt: off
@@ -86,7 +96,7 @@ def forward_loss(
     x_pred_s, x_pred_o = [], []
     for step in range(k):
 
-        # Conditioning | Date and (noisy) ERA5 of the last input state, the same for every member
+        # The date and the (noisy) ERA5 of the last input state are the same for every member
         cond_s, cond_o = get_weights_conditioning(dates[n - 1 + step], c_inp[:, step], noise=noise[step], device=device)
         cond_s, cond_o = cond_s.repeat_interleave(members, dim=0), cond_o.repeat_interleave(members, dim=0)
 
@@ -96,7 +106,7 @@ def forward_loss(
         x_pred_s.append(x_s[:, 0])
         x_pred_o.append(x_o[:, 0])
 
-        # Sliding window | Oldest state out, forecast in
+        # The window slides by one day: the oldest state goes out, the forecast comes in
         x_inp_s = torch.cat([x_inp_s[:, 1:], x_s], dim=1)
         x_inp_o = torch.cat([x_inp_o[:, 1:], x_o], dim=1)
 
@@ -177,18 +187,14 @@ def training(
     assert all(w >= 0 for w in rollout_weights) and sum(rollout_weights) > 0, f"ERROR - rollout_weights must be non-negative, with a positive sum, got {rollout_weights}."
     assert len(noise_forcing_levels) == rollout_days, f"ERROR - noise_forcing_levels must have {rollout_days} elements, got {len(noise_forcing_levels)}."
 
-    # Model | Loading the pre-trained checkpoint
+    # The fine-tuning starts from the pre-trained checkpoint
     model, config = _load_model(checkpoint_name, device)
 
-    # Weights & Biases | Run named after the architecture
-    run_name = generate_run_name_fgn(
-        input_states      = model.input_states,
-        lat_channels      = model.lat_channels,
-        compression       = model.compression()[2],
-        tokens            = sum(model.tokens),
-        hid_channels      = model.processor.in_proj.out_features,
-        hid_blocks        = len(model.processor.blocks),
-        previous_run_name = checkpoint_name,
+    # The Weights & Biases run is named after the architecture
+    run_name = generate_run_name(
+        f"FGN_in{model.input_states}_lc{model.lat_channels}_cf{round(model.compression()[2])}"
+        f"_tk{sum(model.tokens)}_hc{model.processor.in_proj.out_features}_hb{len(model.processor.blocks)}",
+        checkpoint_name,
     )
 
     if rank == 0:
@@ -233,14 +239,14 @@ def training(
         output_states   = rollout_days,
     )
 
-    # Loss | CRPS of the normalized increments, averaged over the non-constant variable-levels and weighted over the days
+    # The loss is the CRPS of the normalized increments, averaged over the non-constant variable-levels and weighted over the days
     weights = (torch.tensor(rollout_weights, device=device), *get_weights_loss(device=device))
 
-    # Noise | Added to the ERA5 conditioning of each step, during the training and the validation
+    # The noise is added to the ERA5 conditioning of each step, during the training and the validation
     noise = noise_forcing_levels if noise_forcing else [0.0] * rollout_days
 
-    # Model | Masks, meshes and statistics are identical on every process, no need to broadcast them, and the
-    #         static graph allows the parameters to be used once per step of the rollout before the backward pass
+    # Masks, meshes and statistics are identical on every process, so they are not broadcast, and the static
+    # graph lets the parameters be used once per step of the rollout before the backward pass
     if is_distributed:
         ddp_kwargs = {"device_ids": [local_rank], "output_device": local_rank} if device.type == "cuda" else {}
         model      = DDP(model, broadcast_buffers=False, gradient_as_bucket_view=True, static_graph=True, **ddp_kwargs)
@@ -386,74 +392,34 @@ if __name__ == "__main__":
     config_wandb   = configs[0]["WandB"]
     config_cluster = configs[0]["Cluster"]
 
-    nodes         = config_cluster["nodes"]
-    gpus_per_node = config_cluster["gpus-per-node"]
-    cpus_per_node = config_cluster["cpus-per-node"]
-    ram_per_node  = config_cluster["ram-per-node"]
+    def finetune(i: int) -> None:
+        r"""Fine-tune the FGN of the i-th configuration."""
+
+        training(
+            config_state    = configs[i]["State"],
+            config_training = configs[i]["Training"],
+            config_wandb    = config_wandb,
+            config_cluster  = config_cluster,
+        )
 
     # Local
     if args.backend == "async":
-        for config in configs:
-            training(
-                config_state    = config["State"],
-                config_training = config["Training"],
-                config_wandb    = config_wandb,
-                config_cluster  = config_cluster,
-            )
+        for i in range(len(configs)):
+            finetune(i)
 
     # Cluster
     else:
-
-        # Freeze modules to avoid pickling issues
-        import neptune.data
-        import neptune.data.dataloader
-        import neptune.data.dataset
-        import neptune.data.weights
-        import neptune.loss
-        import neptune.model.fgn
-        for _mod in [
-            neptune.data,
-            neptune.data.dataset,
-            neptune.data.weights,
-            neptune.data.dataloader,
-            neptune.loss,
-            neptune.model.fgn,
-        ]:
-            cloudpickle.register_pickle_by_value(_mod)
-
-        if nodes > 1:
-            interpreter = (
-                f"torchrun --nnodes {nodes} --nproc-per-node {gpus_per_node} "
-                f"--rdzv_backend=c10d --rdzv_endpoint=$SLURMD_NODENAME:$((20000 + SLURM_JOB_ID % 10000)) "
-                f"--rdzv_id=$SLURM_JOB_ID"
-            )
-        else:
-            interpreter = f"torchrun --nnodes 1 --nproc-per-node {gpus_per_node} --standalone"
-
-        @job(
-            array     = len(configs),
-            nodes     = nodes,
-            gpus      = gpus_per_node,
-            cpus      = cpus_per_node,
-            ram       = ram_per_node,
-            time      = config_cluster["time"],
-            account   = config_cluster["account"],
-            partition = config_cluster["partition"],
-        )
-        def finetune(i: int) -> None:
-            r"""Fine-tune the FGN of the i-th configuration."""
-
-            training(
-                config_state    = configs[i]["State"],
-                config_training = configs[i]["Training"],
-                config_wandb    = config_wandb,
-                config_cluster  = config_cluster,
-            )
-
-        schedule(
+        schedule_training(
             finetune,
-            name="NEPT-FINETUNE",
-            backend="slurm",
-            interpreter=interpreter,
-            export="ALL",
+            name           = "NEPT-FINETUNE",
+            config_cluster = config_cluster,
+            modules        = [
+                neptune.data,
+                neptune.data.dataset,
+                neptune.data.weights,
+                neptune.data.dataloader,
+                neptune.loss,
+                neptune.model.fgn,
+            ],
+            array          = len(configs),
         )

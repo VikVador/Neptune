@@ -1,11 +1,18 @@
 r"""Launch the diagnostics of a FGN on a split of the dataset: metrics, maps and animations of its forecasts."""
 
 import argparse
-import cloudpickle
 import os
 
 from dawgz import after, job, schedule
 from shaggy.tools import load_config
+
+import neptune.data
+import neptune.data.dataset
+import neptune.data.weights
+import neptune.diagnostics
+import neptune.diagnostics.figures
+import neptune.diagnostics.metrics
+import neptune.model.fgn
 
 from neptune.config import PATH_MODELS
 from neptune.data import DATASET_VARIABLES
@@ -25,7 +32,7 @@ from neptune.diagnostics.metrics import (
     compute_animations,
     compute_metrics,
 )
-from neptune.tools import load_configuration
+from neptune.tools import freeze_modules, load_configuration
 
 # fmt: off
 #
@@ -66,7 +73,7 @@ if __name__ == "__main__":
     # Security
     assert len(noise) == days, f"ERROR - noise_forcing_levels must have {days} elements, got {len(noise)}."
 
-    # Windows | Forecasts started every `stride` days of the split, animations from the dates of their last input state
+    # Forecasts start every `stride` days of the split, the animations being chosen by the date of their last input state
     n       = load_config(PATH_MODELS / checkpoint_name).input_states
     dataset = NeptuneDataset(*SPLITS[split], input_states=n, output_states=days)
     starts  = [dataset.dates[i + n - 1] for i in range(len(dataset))]
@@ -79,18 +86,11 @@ if __name__ == "__main__":
 
     animate = [starts.index(date) for date in config_animations["dates"]]
 
-    # GPU | Exported to the jobs, against the fragmentation of the memory by the varying sizes of the tensors
+    # Exported to the jobs, against the fragmentation of the GPU memory by tensors of varying sizes
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    # Freeze modules, such that the jobs use the code as it is at submission
-    import neptune.data
-    import neptune.data.dataset
-    import neptune.data.weights
-    import neptune.diagnostics
-    import neptune.diagnostics.figures
-    import neptune.diagnostics.metrics
-    import neptune.model.fgn
-    for _mod in [
+    # The jobs run the code as it is at submission
+    freeze_modules([
         neptune.data,
         neptune.data.dataset,
         neptune.data.weights,
@@ -98,8 +98,7 @@ if __name__ == "__main__":
         neptune.diagnostics.figures,
         neptune.diagnostics.metrics,
         neptune.model.fgn,
-    ]:
-        cloudpickle.register_pickle_by_value(_mod)
+    ])
 
     @job(array=len(chunks), **cluster["metrics"])
     def metrics(i: int) -> None:

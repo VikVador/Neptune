@@ -1,20 +1,25 @@
 r"""Launch the training of a Functional Generative Network (FGN) forecasting the next day."""
 
 import argparse
-import cloudpickle
 import dask
 import math
 import torch
 import torch.distributed as dist
 import wandb
 
-from dawgz import job, schedule
 from omegaconf import OmegaConf
 from shaggy.optimizers.gradients import safe_gradient_step
 from shaggy.optimizers.soap import SOAP
 from shaggy.tools import load, load_config, save
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+import neptune.data
+import neptune.data.dataloader
+import neptune.data.dataset
+import neptune.data.weights
+import neptune.loss
+import neptune.model.fgn
 
 from neptune.config import PATH_MODELS
 from neptune.data import DATASET_CONDITIONING
@@ -24,7 +29,12 @@ from neptune.distributed import reduce_mean, setup_distributed
 from neptune.loss import loss_crps
 from neptune.model import FGN
 from neptune.schedulers import warmup_cosine_decay
-from neptune.tools import generate_run_name_fgn, get_wandb_hyperparameters, load_configuration
+from neptune.tools import (
+    generate_run_name,
+    get_wandb_hyperparameters,
+    load_configuration,
+    schedule_training,
+)
 
 
 # fmt: off
@@ -51,7 +61,7 @@ def _build_model(
         config    = OmegaConf.to_container(load_config(ckpt_path))
         model     = load(ckpt_path, FGN, device=str(device)).train()
     else:
-        # Conditioning | Date (sin, cos) of the surface and ocean, and ERA5 of the surface only
+        # The date (sin, cos) conditions the surface and the ocean, ERA5 only the surface
         config = {**config_model, "cond_channels_surface": 2 + len(DATASET_CONDITIONING)}
         model  = FGN(**config).to(device)
 
@@ -152,18 +162,14 @@ def training(
         config_training["warmup_steps"],
     )
 
-    # Model | Loading a checkpoint or building from scratch
+    # The model is loaded from a checkpoint or built from scratch
     model, config = _build_model(config_model, checkpoint_name, device)
 
-    # Weights & Biases | Run named after the architecture
-    run_name = generate_run_name_fgn(
-        input_states      = model.input_states,
-        lat_channels      = model.lat_channels,
-        compression       = model.compression()[2],
-        tokens            = sum(model.tokens),
-        hid_channels      = model.processor.in_proj.out_features,
-        hid_blocks        = len(model.processor.blocks),
-        previous_run_name = checkpoint_name,
+    # The Weights & Biases run is named after the architecture
+    run_name = generate_run_name(
+        f"FGN_in{model.input_states}_lc{model.lat_channels}_cf{round(model.compression()[2])}"
+        f"_tk{sum(model.tokens)}_hc{model.processor.in_proj.out_features}_hb{len(model.processor.blocks)}",
+        checkpoint_name,
     )
 
     if rank == 0:
@@ -208,10 +214,10 @@ def training(
         output_states   = 1,
     )
 
-    # Loss | CRPS of the normalized increments, averaged over the non-constant variable-levels
+    # The loss is the CRPS of the normalized increments, averaged over the non-constant variable-levels
     weights = get_weights_loss(device=device)
 
-    # Model | Masks, meshes and statistics are identical on every process, no need to broadcast them
+    # Masks, meshes and statistics are identical on every process, so they are not broadcast
     if is_distributed:
         ddp_kwargs = {"device_ids": [local_rank], "output_device": local_rank} if device.type == "cuda" else {}
         model      = DDP(model, broadcast_buffers=False, gradient_as_bucket_view=True, **ddp_kwargs)
@@ -357,76 +363,35 @@ if __name__ == "__main__":
     config_wandb   = configs[0]["WandB"]
     config_cluster = configs[0]["Cluster"]
 
-    nodes         = config_cluster["nodes"]
-    gpus_per_node = config_cluster["gpus-per-node"]
-    cpus_per_node = config_cluster["cpus-per-node"]
-    ram_per_node  = config_cluster["ram-per-node"]
+    def train(i: int) -> None:
+        r"""Train the FGN of the i-th configuration."""
+
+        training(
+            config_state    = configs[i]["State"],
+            config_training = configs[i]["Training"],
+            config_model    = configs[i]["Model"],
+            config_wandb    = config_wandb,
+            config_cluster  = config_cluster,
+        )
 
     # Local
     if args.backend == "async":
-        for config in configs:
-            training(
-                config_state    = config["State"],
-                config_training = config["Training"],
-                config_model    = config["Model"],
-                config_wandb    = config_wandb,
-                config_cluster  = config_cluster,
-            )
+        for i in range(len(configs)):
+            train(i)
 
     # Cluster
     else:
-
-        # Freeze modules to avoid pickling issues
-        import neptune.data
-        import neptune.data.dataloader
-        import neptune.data.dataset
-        import neptune.data.weights
-        import neptune.loss
-        import neptune.model.fgn
-        for _mod in [
-            neptune.data,
-            neptune.data.dataset,
-            neptune.data.weights,
-            neptune.data.dataloader,
-            neptune.loss,
-            neptune.model.fgn,
-        ]:
-            cloudpickle.register_pickle_by_value(_mod)
-
-        if nodes > 1:
-            interpreter = (
-                f"torchrun --nnodes {nodes} --nproc-per-node {gpus_per_node} "
-                f"--rdzv_backend=c10d --rdzv_endpoint=$SLURMD_NODENAME:$((20000 + SLURM_JOB_ID % 10000)) "
-                f"--rdzv_id=$SLURM_JOB_ID"
-            )
-        else:
-            interpreter = f"torchrun --nnodes 1 --nproc-per-node {gpus_per_node} --standalone"
-
-        @job(
-            array     = len(configs),
-            nodes     = nodes,
-            gpus      = gpus_per_node,
-            cpus      = cpus_per_node,
-            ram       = ram_per_node,
-            time      = config_cluster["time"],
-            account   = config_cluster["account"],
-            partition = config_cluster["partition"],
-        )
-        def train(i: int) -> None:
-            r"""Train the FGN of the i-th configuration."""
-
-            training(
-                config_state    = configs[i]["State"],
-                config_training = configs[i]["Training"],
-                config_model    = configs[i]["Model"],
-                config_wandb    = config_wandb,
-                config_cluster  = config_cluster,
-            )
-
-        schedule(
+        schedule_training(
             train,
-            name="NEPT-TRAIN",
-            backend="slurm",
-            interpreter=interpreter,
-            export="ALL",
+            name           = "NEPT-TRAIN",
+            config_cluster = config_cluster,
+            modules        = [
+                neptune.data,
+                neptune.data.dataset,
+                neptune.data.weights,
+                neptune.data.dataloader,
+                neptune.loss,
+                neptune.model.fgn,
+            ],
+            array          = len(configs),
         )
