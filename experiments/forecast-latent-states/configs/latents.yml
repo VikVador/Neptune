@@ -1,0 +1,16 @@
+Cluster:
+    "account"   : ["bsmfc"]
+    "partition" : ["gpu"]
+    "time"      : ["08:00:00"]
+    "cpus"      : [8]
+    "gpus"      : [1]
+    "ram"       : ["60GB"]
+
+Checkpoints:
+    "surface" : [null]
+    "ocean"   : [null]
+
+Encoding:
+    "batch_size"      : [4]
+    "num_workers"     : [7]
+    "prefetch_factor" : [2]
