@@ -23,9 +23,8 @@ import neptune.model.encoders
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
-from neptune.data.weights import get_weights_conditioning
 from neptune.distributed import reduce_mean, setup_distributed
-from neptune.model.encoders import LatentEncoder, OceanEncoder, SurfaceEncoder
+from neptune.model.encoders import Encoder, stack_dates
 from neptune.schedulers import warmup_cosine_decay
 from neptune.tools import (
     generate_run_name,
@@ -34,22 +33,18 @@ from neptune.tools import (
     schedule_training,
 )
 
+
 # fmt: off
 #
-ENCODERS = {"surface": SurfaceEncoder, "ocean": OceanEncoder}
-
-
 def _build_model(
-    group           : str,
     config_model    : dict,
     checkpoint_name : str | None,
     device          : torch.device,
-) -> tuple[LatentEncoder, dict]:
+) -> tuple[Encoder, dict]:
     r"""Build an encoder from scratch, or resume it from a checkpoint.
 
     Arguments:
-        group           : Group of variables, 'surface' or 'ocean'.
-        config_model    : Constructor kwargs of the encoder, used when training from scratch.
+        config_model    : Constructor kwargs of the encoder (group, ...), used when training from scratch.
         checkpoint_name : Name of the checkpoint to resume from (if applicable).
         device          : Target device.
 
@@ -61,10 +56,10 @@ def _build_model(
     if checkpoint_name is not None:
         ckpt_path = PATH_MODELS / checkpoint_name
         config    = OmegaConf.to_container(load_config(ckpt_path))
-        model     = load(ckpt_path, ENCODERS[group], device=str(device)).train()
+        model     = load(ckpt_path, Encoder, device=str(device)).train()
     else:
         config = config_model
-        model  = ENCODERS[group](**config).to(device)
+        model  = Encoder(**config).to(device)
 
     return model, config
 
@@ -75,11 +70,11 @@ def forward_loss(
     group  : str,
     device : torch.device,
 ) -> Tensor:
-    r"""Encode the states of a batch, with their conditioning, and compute the GME loss between the states and their latents.
+    r"""Encode the states of a batch, with their date, and compute the GME loss between the states and their latents.
 
     Arguments:
         model  : Encoder, possibly wrapped by DDP.
-        batch  : Single state with its conditioning and date, from NeptuneDataset.
+        batch  : Single state with its date, from NeptuneDataset.
         group  : Group of variables, 'surface' or 'ocean'.
         device : Target device.
 
@@ -87,17 +82,15 @@ def forward_loss(
         loss : GME loss of the encoder.
     """
 
-    x_inp_s, x_inp_o, _, _, c_inp, dates = batch
+    x_inp_s, x_inp_o, _, _, _, dates = batch
 
-    # The states are encoded with their conditioning: the date and ERA5 at the surface, the date in the ocean (the collate transposes the dates)
-    cond_s, cond_o = get_weights_conditioning(dates[0], c_inp[:, 0], device=device)
-    states, cond   = (x_inp_s[:, 0], cond_s) if group == "surface" else (x_inp_o[:, 0], cond_o)
-    states         = states.to(device)
+    # The states are encoded with their date (the collate transposes the dates)
+    states = (x_inp_s if group == "surface" else x_inp_o)[:, 0].to(device)
 
     with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
-        z = model(torch.cat([states, cond], dim=1))
+        z = model(stack_dates(states, dates[0]))
 
-    # The loss only compares the geometry of the states, the conditioning being an input of the encoder
+    # The loss only compares the geometry of the states, the date being an input of the encoder
     return loss_geometry_embedding(states, z.float())
 
 
@@ -161,9 +154,8 @@ def training(
     # Security
     assert batch_size_per_gpu > 1, f"ERROR - The GME loss pairs the samples of a GPU, batch_size_per_gpu must be > 1, got {batch_size_per_gpu}."
 
-    # The model is loaded from a checkpoint or built from scratch, the group selecting the class of the encoder
-    config        = {key: value for key, value in config_model.items() if key != "group"}
-    model, config = _build_model(group, config, checkpoint_name, device)
+    # The model is loaded from a checkpoint or built from scratch
+    model, config = _build_model(config_model, checkpoint_name, device)
 
     # The Weights & Biases run is named after the architecture
     run_name = generate_run_name(f"ENC_{group}_lc{model.lat_channels}_tk{model.tokens}", checkpoint_name)
@@ -195,7 +187,7 @@ def training(
         None,
     ]
 
-    # Each sample is a single state of the group, with the conditioning of its date
+    # Each sample is a single state of the group, with its date
     dataloader_training, dataloader_validation, _ = get_dataloaders(
         batch_size      = batch_size_per_gpu,
         num_workers     = num_workers,
