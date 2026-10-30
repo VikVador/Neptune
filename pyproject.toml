@@ -13,7 +13,7 @@ dependencies = [
   "cloudpickle>=3.1.2",
   "cmocean>=4.0.3",
   "dask>=2024.6.2",
-  "dawgz>=1.0.4",
+  "dawgz==1.0.4",
   "matplotlib>=3.9.0",
   "netCDF4>=1.7.0",
   "numpy>=1.26.3",
