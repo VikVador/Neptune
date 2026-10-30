@@ -22,6 +22,7 @@ __all__ = [
     "PATH_STATS_INCREMENTS",
     "PATH_STATS_CONDITIONING",
     "PATH_MASK",
+    "PATH_MASK_NEMO",
     "PATH_CONDITIONING",
     "PATH_CLIMATOLOGY",
 ]
@@ -60,8 +61,9 @@ PATH_GRID_T = PATH_PATHS / "grid_T.txt"
 PATH_PTRC   = PATH_PATHS / "ptrc_T.txt"
 PATH_BTRC   = PATH_PATHS / "btrc_T.txt"
 
-PATH_STATS_INCREMENTS = PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_increments.zarr"
-PATH_MASK             = PATH_DATASETS / "structure"  / "black_sea_phys_bio_hr001_mask.zarr"
+# Land/sea mask of NEMO, and the one used by Neptune, where the voxels with impossible values are land
+PATH_MASK_NEMO = PATH_DATASETS / "structure" / "black_sea_phys_bio_hr001_mask.zarr"
+PATH_MASK      = PATH_DATASETS / "structure" / "black_sea_phys_bio_hr001_mask_cleaned.zarr"
 
 # Daily means of the ERA5 atmospheric forcing of NEMO, interpolated on its grid
 PATH_CONDITIONING = PATH_DATASETS / "conditioning" / "black_sea_era5_hr001_conditioning.zarr"
@@ -69,13 +71,11 @@ PATH_CONDITIONING = PATH_DATASETS / "conditioning" / "black_sea_era5_hr001_condi
 # Daily climatology of the states over the training period
 PATH_CLIMATOLOGY = PATH_DATASETS / "climatology" / "black_sea_phys_bio_hr001_climatology.zarr"
 
-# Statistics over the whole period (global), or averaged over the statistics of each month or day
-PATH_STATS = {
-    "global"  : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states.zarr",
-    "monthly" : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states_monthly.zarr",
-    "daily"   : PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states_daily.zarr",
-}
+# Statistics of the cleaned states and of their daily increments, over the training period
+PATH_STATS            = PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_states_cleaned.zarr"
+PATH_STATS_INCREMENTS = PATH_DATASETS / "statistics" / "black_sea_phys_bio_hr001_statistics_increments_cleaned.zarr"
 
+# Statistics of the conditioning over the whole period (global), or averaged over those of each month or day
 PATH_STATS_CONDITIONING = {
     "global"  : PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_conditioning.zarr",
     "monthly" : PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_conditioning_monthly.zarr",

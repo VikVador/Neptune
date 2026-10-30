@@ -76,7 +76,7 @@ if __name__ == "__main__":
     # Forecasts start every `stride` days of the split, the animations being chosen by the date of their last input state
     n       = load_config(PATH_MODELS / checkpoint_name).input_states
     dataset = NeptuneDataset(*SPLITS[split], input_states=n, output_states=days)
-    starts  = [dataset.dates[i + n - 1] for i in range(len(dataset))]
+    starts  = [dataset.dates[i + n - 1] for i in dataset.windows]
     windows = list(range(0, len(dataset), evaluation["stride"]))
     chunks  = [windows[i : i + evaluation["dates_per_job"]] for i in range(0, len(windows), evaluation["dates_per_job"])]
 
