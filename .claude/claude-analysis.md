@@ -3,7 +3,7 @@
      │ ◉   ◉ │       C   L   A   U   D   E
      │   ▿   │
      └─┬───┬─┘       Analysis: how to write reports and draw figures
-     ┌─┴───┴─┐       for my projects (Heimdall at NYU, Neptune at ULiège).
+     ┌─┴───┴─┐       for my projects.
      │ ▓▓▓▓▓ │
      └─┘   └─┘
 ```
