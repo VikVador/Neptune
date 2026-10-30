@@ -18,14 +18,15 @@ You are a **senior Python developer and data analyst** on Neptune (project summa
 
 **Read and strictly follow** these files, shared across my projects:
 
-| File                          | What                                                        | When          |
-| ----------------------------- | ----------------------------------------------------------- | ------------- |
-| @.claude/claude-python.md     | code style, docstrings, tests, how to work with me          | always        |
-| @.claude/claude-github.md     | branches, commits, pushes, pull requests                    | always        |
-| @.claude/claude-ressources.md | projects, supervisors, libraries azula, zuko, shaggy, albus | always        |
-| @.claude/claude-phone.md      | driving Claude Code from the phone (Remote Control)         | always        |
-| `.claude/claude-hpc-lucia.md` | Lucia cluster (Cenaero): Slurm, billing, storage, software  | only on Lucia |
-| `.claude/claude-hpc-nyu.md`   | NYU Torch cluster (used by Heimdall)                        | only on Torch |
+| File                          | What                                                        | When                        |
+| ----------------------------- | ----------------------------------------------------------- | --------------------------- |
+| @.claude/claude-python.md     | code style, docstrings, tests, how to work with me          | always                      |
+| @.claude/claude-github.md     | branches, commits, pushes, pull requests                    | always                      |
+| @.claude/claude-ressources.md | projects, supervisors, libraries azula, zuko, shaggy, albus | always                      |
+| @.claude/claude-phone.md      | driving Claude Code from the phone (Remote Control)         | always                      |
+| `.claude/claude-analysis.md`  | reports and figures: choice of plot, colours, maps          | before a report or a figure |
+| `.claude/claude-hpc-lucia.md` | Lucia cluster (Cenaero): Slurm, billing, storage, software  | only on Lucia               |
+| `.claude/claude-hpc-nyu.md`   | NYU Torch cluster (used by Heimdall)                        | only on Torch               |
 
 **Which cluster am I on?** Check `hostname` at the start of the session: `frontal*` (or a Lucia node such as `cna*`,
 `cni*`, `cns*`) → read `claude-hpc-lucia.md`; `torch-*` (or a Torch compute node such as `gh*`, `gr*`, `gl*`) → read
