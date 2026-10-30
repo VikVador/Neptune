@@ -1,9 +1,8 @@
 r"""Deterministic encoders of the surface and ocean states into latent grids."""
 
 __all__ = [
-    "LatentEncoder",
-    "SurfaceEncoder",
-    "OceanEncoder",
+    "Encoder",
+    "stack_dates",
 ]
 
 import math
@@ -16,94 +15,93 @@ from torch import Tensor
 from typing import Any
 
 from neptune.data import (
-    DATASET_CONDITIONING,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     X,
     Y,
     Z,
 )
-from neptune.data.weights import get_weights_mask, get_weights_mesh
+from neptune.data.weights import get_weights_date, get_weights_mesh
+
+# fmt: off
+#
+# ----- Variables and spatial shape of each group
+#
+GROUPS = {
+    "surface" : (DATASET_VARIABLES_SURFACE, (Y, X)),
+    "ocean"   : (DATASET_VARIABLES_OCEAN,   (Z, Y, X)),
+}
+# fmt: on
 
 
-class LatentEncoder(nn.Module):
-    r"""Creates a deterministic encoder of states and their conditioning, stacked with static inputs, into a latent grid.
+def stack_dates(states: Tensor, dates: Sequence[str]) -> Tensor:
+    r"""Stack states with the sin/cos encoding of their date, the inputs of an encoder.
 
     Arguments:
-        static       : Land/sea mask and sin/cos mesh (1 + C_m, L_1, ..., L_S).
-        in_channels  : Number of channels of the states and their conditioning C_i.
-        resolution   : Spatial shape of the states (L_1, ..., L_S).
+        states : Surface (B, C_s, Y, X) or ocean (B, C_o, Z, Y, X) states.
+        dates  : Date strings 'YYYY-MM-DD' of the states (B,).
+
+    Returns:
+        x : States and their date (B, C + 2, [Z,] Y, X).
+    """
+
+    encodings = [get_weights_date(date, dim=2, device=states.device) for date in dates]
+    surface = states.ndim == 4
+    date = torch.cat([date_s if surface else date_o for date_s, date_o in encodings])
+
+    return torch.cat([states, date.to(states.dtype)], dim=1)
+
+
+class Encoder(nn.Module):
+    r"""Creates the deterministic encoder of a group of variables, its states and date stacked with the mesh of its grid.
+
+    Arguments:
+        group        : Group of variables, 'surface' or 'ocean'.
         lat_channels : Number of latent channels C_z.
-        config       : Keyword arguments of the ConvEncoder (hid_channels, ...).
+        config       : Keyword arguments of the ConvEncoder (hid_channels, stride, ...).
     """
 
     def __init__(
         self,
-        static: Tensor,
-        in_channels: int,
-        resolution: Sequence[int],
+        group: str,
         lat_channels: int,
         **config: Any,
     ) -> None:
         super().__init__()
 
+        # Security
+        assert group in GROUPS, f"ERROR - group must be 'surface' or 'ocean', got {group}."
+
+        self.group = group
         self.lat_channels = lat_channels
+        variables, shape = GROUPS[group]
+
+        # The sin/cos mesh is rebuilt at loading (not saved)
+        mesh_surface, mesh_ocean = get_weights_mesh()
+        static = mesh_surface if group == "surface" else mesh_ocean
         self.register_buffer("static", static, persistent=False)
 
+        # The states, their date and the mesh are first mixed into as many channels as there are variables
         self.encoder = ConvEncoder(
-            in_channels + len(static),
+            len(variables) + 2 + len(static),
             lat_channels,
-            spatial=len(resolution),
+            mix_channels=len(variables),
+            spatial=len(shape),
             mod_features=None,
             **config,
         )
 
-        self.shape = [n // s for n, s in zip(resolution, self.encoder.scale, strict=True)]
+        # Each spatial dimension of the latent grid is divided by the scale of the encoder
+        self.shape = [n // s for n, s in zip(shape, self.encoder.scale, strict=True)]
         self.tokens = math.prod(self.shape)
 
     def forward(self, x: Tensor) -> Tensor:
-        r"""Encode states and their conditioning into latent grids.
+        r"""Encode states and their date into latent grids.
 
         Arguments:
-            x : States and their conditioning (B, C_i, L_1, ..., L_S).
+            x : States and their date (B, C + 2, [Z,] Y, X).
 
         Returns:
-            z : Latent grids (B, C_z, L_1', ..., L_S').
+            z : Latent grids (B, C_z, [Z',] Y', X').
         """
         return self.encoder(torch.cat([x, self.static.expand(len(x), *self.static.shape)], dim=1))
-
-
-class SurfaceEncoder(LatentEncoder):
-    r"""Creates the deterministic encoder of the surface states, conditioned on the date and ERA5.
-
-    Arguments:
-        lat_channels : Number of latent channels C_z.
-        config       : Keyword arguments of the ConvEncoder (hid_channels, ...).
-    """
-
-    def __init__(
-        self,
-        lat_channels: int,
-        **config: Any,
-    ) -> None:
-        (mask, _), (mesh, _) = get_weights_mask(), get_weights_mesh()
-        channels = len(DATASET_VARIABLES_SURFACE) + 2 + len(DATASET_CONDITIONING)
-        super().__init__(torch.cat([mask, mesh]), channels, (Y, X), lat_channels, **config)
-
-
-class OceanEncoder(LatentEncoder):
-    r"""Creates the deterministic encoder of the ocean states, conditioned on the date.
-
-    Arguments:
-        lat_channels : Number of latent channels C_z.
-        config       : Keyword arguments of the ConvEncoder (hid_channels, ...).
-    """
-
-    def __init__(
-        self,
-        lat_channels: int,
-        **config: Any,
-    ) -> None:
-        (_, mask), (_, mesh) = get_weights_mask(), get_weights_mesh()
-        channels = len(DATASET_VARIABLES_OCEAN) + 2
-        super().__init__(torch.cat([mask, mesh]), channels, (Z, Y, X), lat_channels, **config)

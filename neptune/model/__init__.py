@@ -1,4 +1,4 @@
 r"""Neural network architectures."""
 
-from .encoders import OceanEncoder, SurfaceEncoder
+from .encoders import Encoder
 from .fgn import FGN
