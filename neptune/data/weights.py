@@ -12,6 +12,7 @@ __all__ = [
     "get_weights_loss",
 ]
 
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -36,7 +37,7 @@ from neptune.data import (
     DATASET_VARIABLES_SURFACE,
     VARIABLES_CLIPPING,
     VARIABLES_CONDITIONING_STANDARDIZATION,
-    VARIABLES_STANDARDIZATION,
+    VARIABLES_LOG10,
     X,
     Y,
     Z,
@@ -127,21 +128,25 @@ def _stats_paths(
     r"""Find the statistics store of each variable, given its standardization.
 
     Arguments:
-        standardization : Standardization of every variable ('global', 'monthly' or 'daily').
+        standardization : Standardization of every conditioning variable ('global', 'monthly' or 'daily').
         conditioning    : Whether to find the stores of the conditioning variables instead.
 
     Returns:
         paths : Path to the statistics zarr store of each variable.
     """
 
-    variables, standardizations, paths = (
-        (DATASET_CONDITIONING, VARIABLES_CONDITIONING_STANDARDIZATION, PATH_STATS_CONDITIONING)
-        if conditioning
-        else (DATASET_VARIABLES, VARIABLES_STANDARDIZATION, PATH_STATS)
-    )
-    default = standardizations["default"]
+    # The states have a single, global, standardization
+    if not conditioning:
+        return dict.fromkeys(DATASET_VARIABLES, PATH_STATS)
 
-    return {var: paths[standardization or standardizations.get(var, default)] for var in variables}
+    default = VARIABLES_CONDITIONING_STANDARDIZATION["default"]
+
+    return {
+        var: PATH_STATS_CONDITIONING[
+            standardization or VARIABLES_CONDITIONING_STANDARDIZATION.get(var, default)
+        ]
+        for var in DATASET_CONDITIONING
+    }
 
 
 def _stats_tensors(paths: dict[str, Path]) -> tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -169,7 +174,7 @@ def _stats_tensors(paths: dict[str, Path]) -> tuple[Tensor, Tensor, Tensor, Tens
 
 
 def _physical_bounds(variables: list[str]) -> tuple[Tensor, Tensor]:
-    r"""Gather the physical bounds of variables, infinite when unbounded.
+    r"""Gather the clipping bounds of variables, infinite when unbounded, in log10 for VARIABLES_LOG10.
 
     Arguments:
         variables : Names of the variables.
@@ -179,9 +184,21 @@ def _physical_bounds(variables: list[str]) -> tuple[Tensor, Tensor]:
         upper : Upper bound of each variable (C,).
     """
 
+    def _transform(bound: float | None, var: str, unbounded: float) -> float:
+        r"""Transform a bound like the values of its variable."""
+
+        if bound is None:
+            return unbounded
+
+        return math.log10(bound + VARIABLES_LOG10[var]) if var in VARIABLES_LOG10 else bound
+
     bounds = [VARIABLES_CLIPPING.get(var, (None, None)) for var in variables]
-    lower = torch.tensor([-torch.inf if lo is None else lo for lo, _ in bounds])
-    upper = torch.tensor([torch.inf if hi is None else hi for _, hi in bounds])
+    lower = torch.tensor([
+        _transform(lo, var, -math.inf) for (lo, _), var in zip(bounds, variables, strict=True)
+    ])
+    upper = torch.tensor([
+        _transform(hi, var, math.inf) for (_, hi), var in zip(bounds, variables, strict=True)
+    ])
 
     return lower, upper
 
@@ -321,16 +338,14 @@ def get_weights_conditioning(
 
 def get_weights_stats(
     *,
-    standardization: str | None = None,
     dim: int = 1,
     device: torch.device | str | None = None,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    r"""Load the standardization statistics of the surface and ocean variables.
+    r"""Load the standardization statistics of the surface and ocean variables (log10 for VARIABLES_LOG10).
 
     Arguments:
-        standardization : Standardization of every variable ('global', 'monthly', 'daily' or 'none')
-        dim             : Use 2 to add a leading batch dimension, 1 otherwise.
-        device          : Target device ("cpu" or "cuda").
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
+        device : Target device ("cpu" or "cuda").
 
     Returns:
         mean_surface : Mean of each surface variable (C_s, 1, 1).
@@ -338,7 +353,7 @@ def get_weights_stats(
         mean_ocean   : Mean of each ocean variable, per level (C_o, Z, 1, 1).
         std_ocean    : Standard deviation of each ocean variable, per level (C_o, Z, 1, 1).
     """
-    return tuple(_prepare(t, dim, device) for t in _stats_tensors(_stats_paths(standardization)))
+    return tuple(_prepare(t, dim, device) for t in _stats_tensors(_stats_paths()))
 
 
 def get_weights_stats_conditioning(

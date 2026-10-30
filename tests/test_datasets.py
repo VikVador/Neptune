@@ -1,5 +1,6 @@
 r"""Tests for neptune.data.dataset."""
 
+import math
 import pytest
 import torch
 
@@ -8,7 +9,8 @@ from neptune.data import (
     DATASET_DATES_TRAINING,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
-    VARIABLES_CLIPPING,
+    VARIABLES_BOUNDS,
+    VARIABLES_LOG10,
     X,
     Y,
     Z,
@@ -85,20 +87,50 @@ def test_getitem_window(tiny_ds: NeptuneDataset, monkeypatch: pytest.MonkeyPatch
     assert c_inp[:, 0, 0, 0].tolist() == [6.0, 7.0, 8.0]
 
 
-def test_standardize_outliers(tiny_ds: NeptuneDataset) -> None:
-    r"""Determines if standardization is reversible and if outliers are replaced by the mean."""
+def test_standardize_reversible(tiny_ds: NeptuneDataset) -> None:
+    r"""Determines if the standardization is reversible."""
 
     x_s, x_o = torch.randn(5, 2, 8, 8), torch.randn(5, 3, 4, 8, 8)
     y_s, y_o = tiny_ds.unstandardize(*tiny_ds.standardize(x_s, x_o))
+
     assert torch.allclose(y_s, x_s)
     assert torch.allclose(y_o, x_o)
 
-    x_s, x_o = torch.zeros(2, 8, 8), torch.zeros(3, 4, 8, 8)
-    x_s[0, 0, 0], x_s[1, 0, 0], x_o[2, 3, 0, 0] = 10.0, 2.0, -10.0
-    y_s, y_o = tiny_ds.replace_outliers(x_s, x_o, n_std=5.0)
-    assert y_s[0, 0, 0] == 0.0
-    assert y_s[1, 0, 0] == 2.0
-    assert y_o[2, 3, 0, 0] == 0.0
+
+def test_transform_typical(tiny_ds: NeptuneDataset) -> None:
+    r"""Determines if values outside their bounds become NaN and if log-normal variables are reversibly in log10."""
+
+    x_s = torch.zeros(len(DATASET_VARIABLES_SURFACE), 8, 8)
+    x_o = torch.ones(len(DATASET_VARIABLES_OCEAN), 4, 8, 8)
+    i_t, i_s = DATASET_VARIABLES_OCEAN.index("votemper"), DATASET_VARIABLES_OCEAN.index("vosaline")
+    x_o[i_t, 0, 0, 0], x_o[i_s, 1, 0, 0] = -13.0, 40.0
+
+    y_s, y_o = tiny_ds.transform(x_s, x_o)
+    z_s, z_o = tiny_ds.untransform(y_s, y_o)
+
+    assert y_o[i_t, 0, 0, 0].isnan() and y_o[i_s, 1, 0, 0].isnan()
+    assert y_o.isnan().sum() == 2
+    for i, var in enumerate(DATASET_VARIABLES_OCEAN):
+        expected = (
+            torch.log10(torch.tensor(1.0 + VARIABLES_LOG10[var]))
+            if var in VARIABLES_LOG10
+            else 1.0
+        )
+        assert torch.isclose(y_o[i, 2, 0, 0], torch.as_tensor(expected))
+    assert torch.allclose(z_o.nan_to_num(1.0), torch.ones_like(z_o), atol=1e-6)
+    assert torch.equal(z_s, x_s)
+
+
+def test_windows_excluded(monkeypatch: pytest.MonkeyPatch, tiny_ds: NeptuneDataset) -> None:
+    r"""Determines if the windows containing an excluded date are removed."""
+
+    monkeypatch.setattr("neptune.data.dataset.DATASET_DATES_EXCLUDED", ["2000-01-05"])
+    ds = NeptuneDataset("2000-01-01", "2000-01-10", input_states=1, output_states=1)
+    starts = [ds.dates[i] for i in ds.windows]
+
+    assert len(ds) == 9 - 2
+    assert "2000-01-04" not in starts and "2000-01-05" not in starts
+    assert starts[3] == "2000-01-06"
 
 
 @pytest.mark.integration
@@ -123,7 +155,7 @@ def test_getitem_real() -> None:
 
 @pytest.mark.integration
 def test_preprocess_physical() -> None:
-    r"""Determines if physical states are clipped to their bounds and NaN on land when asked."""
+    r"""Determines if unstandardized states stay within their bounds (in log10 when needed) and are NaN on land."""
 
     ds = NeptuneDataset(*DATASET_DATES_TRAINING, standardized=False, fill_with_nans=True)
     x_s, x_o = ds.preprocess(ds.dates[3])
@@ -131,9 +163,9 @@ def test_preprocess_physical() -> None:
 
     assert x_s[:, mask_surface[0] == 0].isnan().all()
     assert x_o[:, mask_ocean[0] == 0].isnan().all()
-    for i, var in enumerate(DATASET_VARIABLES_SURFACE):
-        if var in VARIABLES_CLIPPING:
-            assert x_s[i].nan_to_num(0).min() >= 0
     for i, var in enumerate(DATASET_VARIABLES_OCEAN):
-        if var in VARIABLES_CLIPPING:
-            assert x_o[i].nan_to_num(0).min() >= 0
+        lo, hi = VARIABLES_BOUNDS[var]
+        if var in VARIABLES_LOG10:
+            lo, hi = math.log10(lo + VARIABLES_LOG10[var]), math.log10(hi + VARIABLES_LOG10[var])
+        values = x_o[i][x_o[i].isfinite()]
+        assert values.min() >= lo - 1e-5 and values.max() <= hi + 1e-5

@@ -1,0 +1,13 @@
+Compute:
+    "cpus"      : [1]
+    "ram"       : ["8GB"]
+    "time"      : ["03:00:00"]
+    "account"   : ["bsmfc"]
+    "partition" : ["shared"]
+
+Aggregate:
+    "cpus"      : [1]
+    "ram"       : ["4GB"]
+    "time"      : ["00:15:00"]
+    "account"   : ["bsmfc"]
+    "partition" : ["shared"]

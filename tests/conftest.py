@@ -32,7 +32,7 @@ def pytest_collection_modifyitems(
         PATH_PATHS,
         PATH_CONDITIONING,
         PATH_STATS_INCREMENTS,
-        *PATH_STATS.values(),
+        PATH_STATS,
         *PATH_STATS_CONDITIONING.values(),
     )
     if all(path.exists() for path in paths):
