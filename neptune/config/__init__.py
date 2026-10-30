@@ -24,6 +24,7 @@ __all__ = [
     "PATH_MASK",
     "PATH_CONDITIONING",
     "PATH_CLIMATOLOGY",
+    "PATH_LATENTS",
 ]
 
 from pathlib import Path
@@ -68,6 +69,9 @@ PATH_CONDITIONING = PATH_DATASETS / "conditioning" / "black_sea_era5_hr001_condi
 
 # Daily climatology of the states over the training period
 PATH_CLIMATOLOGY = PATH_DATASETS / "climatology" / "black_sea_phys_bio_hr001_climatology.zarr"
+
+# Latent states of every split and their statistics, one folder per encoder
+PATH_LATENTS = PATH_DATASETS / "latents"
 
 # Statistics over the whole period (global), or averaged over the statistics of each month or day
 PATH_STATS = {
