@@ -10,6 +10,7 @@ __all__ = [
     "get_weights_increments",
     "get_weights_bounds",
     "get_weights_loss",
+    "get_weights_distance",
 ]
 
 import math
@@ -477,4 +478,34 @@ def get_weights_loss(
     return (
         _prepare(weights_surface / channels, dim, device),
         _prepare(weights_ocean / channels, dim, device),
+    )
+
+
+def get_weights_distance(
+    *,
+    dim: int = 1,
+    device: torch.device | str | None = None,
+) -> tuple[Tensor, Tensor]:
+    r"""Compute the weight of each channel in the distance between standardized states, one day of change per unit.
+
+    References:
+        | GraphCast: Learning skillful medium-range global weather forecasting (Lam et al., 2023)
+        | https://arxiv.org/abs/2212.12794
+
+    Arguments:
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
+        device : Target device ("cpu" or "cuda").
+
+    Returns:
+        weights_surface : Weight σ/τ of each surface variable (C_s, 1, 1).
+        weights_ocean   : Weight σ/τ of each ocean variable, per level (C_o, Z, 1, 1), 0 on constant levels.
+    """
+
+    # The increments are standardized, so their std is τ/σ
+    constant_surface, constant_ocean = _constant_levels()
+    _, std_inc_surface, _, std_inc_ocean = get_weights_increments()
+
+    return (
+        _prepare(torch.where(constant_surface, 0.0, 1 / std_inc_surface), dim, device),
+        _prepare(torch.where(constant_ocean, 0.0, 1 / std_inc_ocean), dim, device),
     )

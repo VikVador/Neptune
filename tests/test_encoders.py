@@ -4,7 +4,8 @@ import pytest
 import torch
 
 from neptune.data import DATASET_VARIABLES_OCEAN, DATASET_VARIABLES_SURFACE, X, Y, Z
-from neptune.model.encoders import Encoder, stack_dates
+from neptune.data.weights import get_weights_distance
+from neptune.model.encoders import Encoder
 
 CONFIG = {
     "lat_channels": 8,
@@ -17,18 +18,33 @@ CONFIG = {
 
 @pytest.mark.integration
 def test_encoder_typical() -> None:
-    r"""Determines if the surface and ocean encoders map their states and dates onto latent grids downsampled by 16."""
+    r"""Determines if the surface and ocean encoders map their states onto latent grids downsampled by 16."""
 
     surface, ocean = Encoder("surface", **CONFIG), Encoder("ocean", **CONFIG)
-    dates = ["2000-01-01", "2000-07-01"]
-    z_s = surface(stack_dates(torch.randn(2, len(DATASET_VARIABLES_SURFACE), Y, X), dates))
-    z_o = ocean(stack_dates(torch.randn(2, len(DATASET_VARIABLES_OCEAN), Z, Y, X), dates))
+    z_s = surface(torch.randn(2, len(DATASET_VARIABLES_SURFACE), Y, X))
+    z_o = ocean(torch.randn(2, len(DATASET_VARIABLES_OCEAN), Z, Y, X))
 
     assert z_s.shape == (2, 8, *surface.shape) and surface.shape == [Y // 16, X // 16]
     assert z_o.shape == (2, 8, *ocean.shape) and ocean.shape == [Z // 16, Y // 16, X // 16]
     assert ocean.tokens == (Z // 16) * (Y // 16) * (X // 16)
-    assert surface.encoder.mix.out_channels == len(DATASET_VARIABLES_SURFACE)
-    assert ocean.encoder.mix.out_channels == len(DATASET_VARIABLES_OCEAN)
+    assert isinstance(ocean.encoder.mix, torch.nn.Identity)
+
+
+@pytest.mark.integration
+def test_encoder_float32_inputs() -> None:
+    r"""Determines if the first convolution reads the inputs in float32 under a bfloat16 autocast."""
+
+    surface = Encoder("surface", **CONFIG)
+    seen = []
+    surface.encoder.in_proj.register_forward_hook(
+        lambda module, inputs, output: seen.append(output.dtype)
+    )
+
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        z = surface(torch.randn(2, len(DATASET_VARIABLES_SURFACE), Y, X))
+
+    assert seen == [torch.float32]
+    assert z.dtype == torch.bfloat16
 
 
 @pytest.mark.integration
@@ -39,12 +55,13 @@ def test_encoder_wrong_group() -> None:
         Encoder("atmosphere", **CONFIG)
 
 
-def test_stack_dates_typical() -> None:
-    r"""Determines if the sin/cos encoding of each date is stacked after the channels of its state."""
+@pytest.mark.integration
+def test_get_weights_distance_typical() -> None:
+    r"""Determines if the weights are positive, and zero exactly on the constant levels."""
 
-    states = torch.zeros(2, 3, Y, X)
-    x = stack_dates(states, ["2000-01-01", "2000-07-01"])
+    weights_surface, weights_ocean = get_weights_distance()
 
-    assert x.shape == (2, 5, Y, X)
-    assert torch.all(x[:, :3] == 0)
-    assert x[0, 4, 0, 0] > 0.99 and x[1, 4, 0, 0] < -0.99
+    assert weights_surface.shape == (len(DATASET_VARIABLES_SURFACE), 1, 1)
+    assert weights_ocean.shape == (len(DATASET_VARIABLES_OCEAN), Z, 1, 1)
+    assert (weights_surface > 0).all() and (weights_ocean >= 0).all()
+    assert weights_ocean[DATASET_VARIABLES_OCEAN.index("votemper")].min() > 1

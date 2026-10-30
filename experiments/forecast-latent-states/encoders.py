@@ -23,8 +23,9 @@ import neptune.model.encoders
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
+from neptune.data.weights import get_weights_distance
 from neptune.distributed import reduce_mean, setup_distributed
-from neptune.model.encoders import Encoder, stack_dates
+from neptune.model.encoders import Encoder
 from neptune.schedulers import warmup_cosine_decay
 from neptune.tools import (
     generate_run_name,
@@ -65,33 +66,33 @@ def _build_model(
 
 
 def forward_loss(
-    model  : torch.nn.Module,
-    batch  : tuple,
-    group  : str,
-    device : torch.device,
+    model   : torch.nn.Module,
+    batch   : tuple,
+    group   : str,
+    weights : Tensor,
+    device  : torch.device,
 ) -> Tensor:
-    r"""Encode the states of a batch, with their date, and compute the GME loss between the states and their latents.
+    r"""Encode the states of a batch and compute the GME loss between the states and their latents.
 
     Arguments:
-        model  : Encoder, possibly wrapped by DDP.
-        batch  : Single state with its date, from NeptuneDataset.
-        group  : Group of variables, 'surface' or 'ocean'.
-        device : Target device.
+        model   : Encoder, possibly wrapped by DDP.
+        batch   : Single state, from NeptuneDataset.
+        group   : Group of variables, 'surface' or 'ocean'.
+        weights : Weight σ/τ of each channel in the distances, (C, 1, 1) or (C, Z, 1, 1).
+        device  : Target device.
 
     Returns:
         loss : GME loss of the encoder.
     """
 
-    x_inp_s, x_inp_o, _, _, _, dates = batch
-
-    # The states are encoded with their date (the collate transposes the dates)
+    x_inp_s, x_inp_o, _, _, _, _ = batch
     states = (x_inp_s if group == "surface" else x_inp_o)[:, 0].to(device)
 
     with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
-        z = model(stack_dates(states, dates[0]))
+        z = model(states)
 
-    # The loss only compares the geometry of the states, the date being an input of the encoder
-    return loss_geometry_embedding(states, z.float())
+    # The distances between states are counted in typical days of change, whatever the variable and the level
+    return loss_geometry_embedding(states * weights, z.float())
 
 
 def training(
@@ -157,6 +158,10 @@ def training(
     # The model is loaded from a checkpoint or built from scratch
     model, config = _build_model(config_model, checkpoint_name, device)
 
+    # Weight of each channel in the distances between states, computed once
+    weights_surface, weights_ocean = get_weights_distance(device=device)
+    weights = weights_surface if group == "surface" else weights_ocean
+
     # The Weights & Biases run is named after the architecture
     run_name = generate_run_name(f"ENC_{group}_lc{model.lat_channels}_tk{model.tokens}", checkpoint_name)
 
@@ -187,7 +192,7 @@ def training(
         None,
     ]
 
-    # Each sample is a single state of the group, with its date
+    # Each sample is a single state of the group
     dataloader_training, dataloader_validation, _ = get_dataloaders(
         batch_size      = batch_size_per_gpu,
         num_workers     = num_workers,
@@ -237,7 +242,7 @@ def training(
     for step, batch in enumerate(dataloader_training):
 
         # Forward pass and loss
-        loss = forward_loss(model, batch, group, device)
+        loss = forward_loss(model, batch, group, weights, device)
 
         # Gradient accumulation
         loss              = loss / steps_gradient_accumulation
@@ -293,7 +298,7 @@ def training(
             loss_validation = 0.0
             with torch.no_grad():
                 for _ in range(batches_validation):
-                    loss_validation += forward_loss(model, next(dataloader_validation), group, device).item() / batches_validation
+                    loss_validation += forward_loss(model, next(dataloader_validation), group, weights, device).item() / batches_validation
             model.train()
 
             if is_distributed:

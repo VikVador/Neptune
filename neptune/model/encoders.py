@@ -2,14 +2,12 @@ r"""Deterministic encoders of the surface and ocean states into latent grids."""
 
 __all__ = [
     "Encoder",
-    "stack_dates",
 ]
 
 import math
 import torch
 import torch.nn as nn
 
-from collections.abc import Sequence
 from shaggy.models.cae import ConvEncoder
 from torch import Tensor
 from typing import Any
@@ -21,7 +19,7 @@ from neptune.data import (
     Y,
     Z,
 )
-from neptune.data.weights import get_weights_date, get_weights_mesh
+from neptune.data.weights import get_weights_mesh
 
 # fmt: off
 #
@@ -34,26 +32,8 @@ GROUPS = {
 # fmt: on
 
 
-def stack_dates(states: Tensor, dates: Sequence[str]) -> Tensor:
-    r"""Stack states with the sin/cos encoding of their date, the inputs of an encoder.
-
-    Arguments:
-        states : Surface (B, C_s, Y, X) or ocean (B, C_o, Z, Y, X) states.
-        dates  : Date strings 'YYYY-MM-DD' of the states (B,).
-
-    Returns:
-        x : States and their date (B, C + 2, [Z,] Y, X).
-    """
-
-    encodings = [get_weights_date(date, dim=2, device=states.device) for date in dates]
-    surface = states.ndim == 4
-    date = torch.cat([date_s if surface else date_o for date_s, date_o in encodings])
-
-    return torch.cat([states, date.to(states.dtype)], dim=1)
-
-
 class Encoder(nn.Module):
-    r"""Creates the deterministic encoder of a group of variables, its states and date stacked with the mesh of its grid.
+    r"""Creates the deterministic encoder of a group of variables, its states stacked with the mesh of its grid.
 
     Arguments:
         group        : Group of variables, 'surface' or 'ocean'.
@@ -81,11 +61,10 @@ class Encoder(nn.Module):
         static = mesh_surface if group == "surface" else mesh_ocean
         self.register_buffer("static", static, persistent=False)
 
-        # The states, their date and the mesh are first mixed into as many channels as there are variables
+        # The date is not an input: two identical states would otherwise get different latents
         self.encoder = ConvEncoder(
-            len(variables) + 2 + len(static),
+            len(variables) + len(static),
             lat_channels,
-            mix_channels=len(variables),
             spatial=len(shape),
             mod_features=None,
             **config,
@@ -96,12 +75,21 @@ class Encoder(nn.Module):
         self.tokens = math.prod(self.shape)
 
     def forward(self, x: Tensor) -> Tensor:
-        r"""Encode states and their date into latent grids.
+        r"""Encode states into latent grids, the first convolution in float32 whatever the autocast.
 
         Arguments:
-            x : States and their date (B, C + 2, [Z,] Y, X).
+            x : States (B, C, [Z,] Y, X).
 
         Returns:
             z : Latent grids (B, C_z, [Z',] Y', X').
         """
-        return self.encoder(torch.cat([x, self.static.expand(len(x), *self.static.shape)], dim=1))
+
+        x = torch.cat([x, self.static.expand(len(x), *self.static.shape)], dim=1)
+
+        # The daily changes of the deep levels are below the precision of bfloat16, so the inputs are read in float32
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            h = self.encoder.in_proj(self.encoder.patch(x.float()))
+
+        h = self.encoder.descent(h)
+
+        return self.encoder.out_proj(self.encoder.out_norm(h))
