@@ -60,7 +60,7 @@
 | ------ | ------------------------------------------------------------------------------------------------- |
 | Goal   | a generative **emulator of the Black Sea** forecasting the next daily state                       |
 | Data   | daily NEMO 4.2.0 simulation (576 × 256 grid, 48 levels, 1998–2023), ERA5 atmospheric forcing      |
-| Splits | training 1998–2017, validation 2018–2020, test 2021–2023                                          |
+| Splits | training 1998–2017, validation 2018–2020, test 2021–2022 (2023 set aside, being recomputed)       |
 | State  | surface: wind stress, sea surface height                                                          |
 |        | physics: currents, temperature, salinity                                                          |
 |        | biogeochemistry: chlorophyll, oxygen, light, phosphate, silicate, nitrate                         |

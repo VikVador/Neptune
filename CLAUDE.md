@@ -18,19 +18,28 @@ You are a **senior Python developer and data analyst** on Neptune (project summa
 
 **Read and strictly follow** these files, shared across my projects:
 
-| File                          | What                                                        | When                        |
-| ----------------------------- | ----------------------------------------------------------- | --------------------------- |
-| @.claude/claude-python.md     | code style, docstrings, tests, how to work with me          | always                      |
-| @.claude/claude-github.md     | branches, commits, pushes, pull requests                    | always                      |
-| @.claude/claude-ressources.md | projects, supervisors, libraries azula, zuko, shaggy, albus | always                      |
-| @.claude/claude-phone.md      | driving Claude Code from the phone (Remote Control)         | always                      |
-| `.claude/claude-analysis.md`  | reports and figures: choice of plot, colours, maps          | before a report or a figure |
-| `.claude/claude-hpc-lucia.md` | Lucia cluster (Cenaero): Slurm, billing, storage, software  | only on Lucia               |
-| `.claude/claude-hpc-nyu.md`   | NYU Torch cluster (used by Heimdall)                        | only on Torch               |
+| File                          | What                                                        | When          |
+| ----------------------------- | ----------------------------------------------------------- | ------------- |
+| @.claude/claude-python.md     | code style, docstrings, tests, how to work with me          | always        |
+| @.claude/claude-github.md     | branches, commits, pushes, pull requests                    | always        |
+| @.claude/claude-ressources.md | projects, supervisors, libraries azula, zuko, shaggy, albus | always        |
+
+The other guides are **skills** of the plugin `research` ([VikVador/claude](https://github.com/VikVador/claude)),
+installed on each machine and loaded when needed:
+
+| Skill        | When                                                                       |
+| ------------ | -------------------------------------------------------------------------- |
+| `report`     | before any report or analysis page                                         |
+| `figure`     | before any figure carrying a scientific message                            |
+| `animation`  | before a diagram or an animation explaining a mechanism                    |
+| `lucia`      | on the Lucia cluster (Cenaero): Slurm, billing, storage, software          |
+| `torch`      | on the NYU Torch cluster: Slurm, storage, Apptainer, Open Storage Network  |
+| `remote`     | the remote session driven from the phone (`claude-remote`, `/phone`)       |
+| `oral-recap` | a dictated message: recap what was understood before working              |
 
 **Which cluster am I on?** Check `hostname` at the start of the session: `frontal*` (or a Lucia node such as `cna*`,
-`cni*`, `cns*`) → read `claude-hpc-lucia.md`; `torch-*` (or a Torch compute node such as `gh*`, `gr*`, `gl*`) → read
-`claude-hpc-nyu.md`. Read the HPC file **before** any Slurm job, transfer or storage operation.
+`cni*`, `cns*`) → the `lucia` skill; `torch-*` (or a Torch compute node such as `gh*`, `gr*`, `gl*`) → the `torch`
+skill. Read it **before** any Slurm job, transfer or storage operation.
 
 When two rules disagree, the most specific file wins (e.g. `claude-github.md` over `claude-python.md` for commits).
 
@@ -41,7 +50,7 @@ When two rules disagree, the most specific file wins (e.g. `claude-github.md` ov
 Do this when a session starts, is resumed, or comes back after a break of several hours, **before any action**:
 
 1. **Memory**: read `active-session.md` (only one session may act) and `next-session-todo.md` (state and next steps).
-2. **Cluster**: `hostname`, then read the matching HPC file (§ 1).
+2. **Cluster**: `hostname`, then read the matching cluster skill (§ 1).
 3. **Repository**: `git status`, `git log --oneline -5` and the current branch.
 4. **Jobs**: `squeue -u $USER`, to know which trainings run, wait or ended (Neptune submits them with `dawgz`).
 5. **Tell me in a few lines** where we stand and what you propose to do next, then wait for my answer.
