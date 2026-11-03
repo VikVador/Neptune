@@ -28,6 +28,7 @@ Training:
     "steps_checkpoint"    : [256]
     "stopping_window"     : [10]
     "stopping_threshold"  : [0.01]
+    "scale_distances"     : [false]
     "num_workers"         : [7]
     "prefetch_factor"     : [1]
     "warmup_steps"        : [1024]
