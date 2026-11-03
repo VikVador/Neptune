@@ -8,8 +8,10 @@ import torch.distributed as dist
 import wandb
 
 from omegaconf import OmegaConf
+from shaggy.distributed import reduce_mean, setup_distributed
 from shaggy.optimizers.gradients import safe_gradient_step
 from shaggy.optimizers.soap import SOAP
+from shaggy.schedulers import warmup_cosine_decay
 from shaggy.tools import load, load_config, save
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -25,10 +27,8 @@ from neptune.config import PATH_MODELS
 from neptune.data import DATASET_CONDITIONING
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_conditioning, get_weights_loss
-from neptune.distributed import reduce_mean, setup_distributed
 from neptune.loss import loss_crps
 from neptune.model import FGN
-from neptune.schedulers import warmup_cosine_decay
 from neptune.tools import (
     generate_run_name,
     get_wandb_hyperparameters,

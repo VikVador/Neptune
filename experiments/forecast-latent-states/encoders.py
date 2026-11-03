@@ -9,10 +9,13 @@ import wandb
 
 from omegaconf import OmegaConf
 from pathlib import Path
+from shaggy.distributed import reduce_mean, setup_distributed
 from shaggy.loss import loss_geometry_embedding
 from shaggy.optimizers.gradients import safe_gradient_step
 from shaggy.optimizers.soap import SOAP
+from shaggy.schedulers import warmup_cosine_decay
 from shaggy.tools import load, load_config, load_weights, save
+from shaggy.training import has_stagnated, load_state, save_state
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -26,16 +29,14 @@ import neptune.training
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_distance
-from neptune.distributed import reduce_mean, setup_distributed
 from neptune.model.encoders import Encoder
-from neptune.schedulers import warmup_cosine_decay
 from neptune.tools import (
     generate_run_name,
     get_wandb_hyperparameters,
     load_configuration,
     schedule_training,
 )
-from neptune.training import get_run_id, has_stagnated, load_state, save_state, submit_resume
+from neptune.training import get_run_id, submit_resume
 
 
 # fmt: off
@@ -236,20 +237,20 @@ def training(
 
     # Each sample is a single state of the group
     dataloader_training, dataloader_validation, _ = get_dataloaders(
-        batch_size      = batch_size_per_gpu,
-        num_workers     = num_workers,
-        prefetch_factor = prefetch_factor,
-        batches         = batches,
-        shuffle         = [True, False, False],
-        infinite        = [True, False, False],
-        rank            = rank,
-        world_size      = world_size,
-        is_distributed  = is_distributed,
+        batch_size         = batch_size_per_gpu,
+        num_workers        = num_workers,
+        prefetch_factor    = prefetch_factor,
+        batches            = batches,
+        shuffle            = [True, False, False],
+        infinite           = [True, False, False],
+        rank               = rank,
+        world_size         = world_size,
+        is_distributed     = is_distributed,
         samples_validation = samples_validation,
-        seed            = optimizer_step,
-        input_states    = 1,
-        output_states   = 0,
-        group           = group,
+        seed               = optimizer_step,
+        input_states       = 1,
+        output_states      = 0,
+        group              = group,
     )
 
     # Masks and meshes are identical on every process, so they are not broadcast

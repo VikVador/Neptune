@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 
-from neptune.data.dataloader import get_dataloaders, infinite_dataloader
+from neptune.data.dataloader import get_dataloaders
 
 
 def _fake_get_datasets(**kwargs) -> tuple[TensorDataset, TensorDataset, TensorDataset]:
@@ -48,13 +48,6 @@ def test_get_dataloaders_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert all(isinstance(loader.sampler, DistributedSampler) for loader in loaders)
-
-
-def test_infinite_dataloader_typical() -> None:
-    r"""Determines if an infinite dataloader cycles over the dataset for the requested batches."""
-
-    loader = DataLoader(TensorDataset(torch.arange(4).float()), batch_size=2)
-    assert len(list(infinite_dataloader(loader, batches=7))) == 7
 
 
 def test_get_dataloaders_fixed_validation(monkeypatch: pytest.MonkeyPatch) -> None:
