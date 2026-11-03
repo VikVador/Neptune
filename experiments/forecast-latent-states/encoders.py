@@ -138,6 +138,7 @@ def training(
         samples_validation,
         stopping_window,
         stopping_threshold,
+        scale_distances,
         batch_size_per_step,
         batch_size_per_gpu,
         num_workers,
@@ -157,6 +158,7 @@ def training(
         config_training["samples_validation"],
         config_training["stopping_window"],
         config_training["stopping_threshold"],
+        config_training["scale_distances"],
         config_training["batch_size_per_step"],
         config_training["batch_size_per_gpu"],
         config_training["num_workers"],
@@ -179,6 +181,10 @@ def training(
     # Weight of each channel in the distances between states, computed once
     weights_surface, weights_ocean = get_weights_distance(device=device)
     weights = weights_surface if group == "surface" else weights_ocean
+
+    # Without the scaling, every channel weighs 1, except the constant levels that stay out of the distances
+    if not scale_distances:
+        weights = (weights > 0).float()
 
     # The Weights & Biases run is named after the architecture, the jobs of a same training sharing its name
     previous_name = None if checkpoint_name is None else Path(checkpoint_name).parts[0]
