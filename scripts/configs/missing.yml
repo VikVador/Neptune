@@ -1,6 +1,0 @@
-Cluster:
-    "cpus"      : [1]
-    "ram"       : ["5GB"]
-    "time"      : ["00:02:30"]
-    "account"   : ["bsmfc"]
-    "partition" : ["batch"]
