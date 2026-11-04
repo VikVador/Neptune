@@ -33,7 +33,14 @@ def load_configuration(path: str | Path) -> list[dict[str, Any]]:
     """
 
     def _generate_combinations(d: dict[str, Any]) -> list[dict[str, Any]]:
-        r"""Recursively generate parameter combinations."""
+        r"""Recursively generate parameter combinations.
+
+        Arguments:
+            d : Configuration, whose list values are the options of a grid search.
+
+        Returns:
+            combinations : One configuration per combination of the options.
+        """
 
         if isinstance(d, dict):
             combinations = {k: _generate_combinations(v) for k, v in d.items()}

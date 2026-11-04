@@ -364,7 +364,11 @@ if __name__ == "__main__":
     config_cluster = configs[0]["Cluster"]
 
     def train(i: int) -> None:
-        r"""Train the FGN of the i-th configuration."""
+        r"""Train the FGN of the i-th configuration.
+
+        Arguments:
+            i : Index of the configuration.
+        """
 
         training(
             config_state    = configs[i]["State"],

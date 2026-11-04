@@ -186,7 +186,16 @@ def _physical_bounds(variables: list[str]) -> tuple[Tensor, Tensor]:
     """
 
     def _transform(bound: float | None, var: str, unbounded: float) -> float:
-        r"""Transform a bound like the values of its variable."""
+        r"""Transform a bound like the values of its variable.
+
+        Arguments:
+            bound     : Physical bound of the variable, None when it has none.
+            var       : Name of the variable.
+            unbounded : Value returned when the variable has no bound.
+
+        Returns:
+            bound : Bound in the transformed units of the variable.
+        """
 
         if bound is None:
             return unbounded

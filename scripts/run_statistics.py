@@ -155,7 +155,12 @@ if __name__ == "__main__":
 
     @job(array=len(years), **config["Compute"])
     def compute(i: int) -> None:
-        r"""Sum the moments of the i-th year."""
+        r"""Sum the moments of the i-th year.
+
+        Arguments:
+            i : Index of the year.
+        """
+
         compute_sums(years[i])
 
     @after(compute)

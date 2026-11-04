@@ -163,7 +163,12 @@ if __name__ == "__main__":
 
     @job(array=len(files), **config_cluster)
     def fix(i: int) -> None:
-        r"""Fix the i-th missing NetCDF sample."""
+        r"""Fix the i-th missing NetCDF sample.
+
+        Arguments:
+            i : Index of the missing sample.
+        """
+
         fix_missing_sample(files[i])
 
     schedule(
