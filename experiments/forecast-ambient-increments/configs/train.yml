@@ -39,7 +39,6 @@ Model:
     "config_surface":
         "hid_channels"  : [[32, 64, 128, 128, 256]]
         "hid_blocks"    : [[3, 3, 3, 3, 3]]
-        "hid_groups"    : [[0, 0, 0, 0, 0]]
         "kernel_size"   : [3]
         "stride"        : [2]
         "ffn_factor"    : [1]
@@ -49,7 +48,6 @@ Model:
     "config_ocean":
         "hid_channels"  : [[32, 64, 128, 128, 256]]
         "hid_blocks"    : [[3, 3, 3, 3, 3]]
-        "hid_groups"    : [[0, 0, 0, 0, 0]]
         "kernel_size"   : [3]
         "stride"        : [2]
         "ffn_factor"    : [1]
