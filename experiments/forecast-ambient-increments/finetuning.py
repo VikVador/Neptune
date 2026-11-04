@@ -393,7 +393,11 @@ if __name__ == "__main__":
     config_cluster = configs[0]["Cluster"]
 
     def finetune(i: int) -> None:
-        r"""Fine-tune the FGN of the i-th configuration."""
+        r"""Fine-tune the FGN of the i-th configuration.
+
+        Arguments:
+            i : Index of the configuration.
+        """
 
         training(
             config_state    = configs[i]["State"],

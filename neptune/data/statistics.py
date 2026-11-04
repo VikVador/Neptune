@@ -8,7 +8,7 @@ import numpy as np
 
 
 class OnlineStats:
-    r"""Incremental mean and variance using weighted batch averaging."""
+    r"""Creates an incremental mean and variance, averaging the batches by their number of values."""
 
     def __init__(self) -> None:
         self.mu = None

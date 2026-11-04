@@ -284,7 +284,15 @@ class NeptuneDataset(Dataset):
         """
 
         def _transform(x: Tensor, variables: list[str]) -> Tensor:
-            r"""Transform the channels of one group of variables, along the dimension of the channels."""
+            r"""Transform the channels of one group of variables, along the dimension of the channels.
+
+            Arguments:
+                x         : States of one group (..., C, [Z,] Y, X).
+                variables : Names of the variables of the group, in the order of the channels.
+
+            Returns:
+                x : Transformed states.
+            """
 
             dim = -3 if variables == DATASET_VARIABLES_SURFACE else -4
             channels = []
@@ -317,7 +325,15 @@ class NeptuneDataset(Dataset):
         """
 
         def _untransform(x: Tensor, variables: list[str]) -> Tensor:
-            r"""Untransform the channels of one group of variables, along the dimension of the channels."""
+            r"""Untransform the channels of one group of variables, along the dimension of the channels.
+
+            Arguments:
+                x         : Transformed states of one group (..., C, [Z,] Y, X).
+                variables : Names of the variables of the group, in the order of the channels.
+
+            Returns:
+                x : States in physical units.
+            """
 
             dim = -3 if variables == DATASET_VARIABLES_SURFACE else -4
             channels = [

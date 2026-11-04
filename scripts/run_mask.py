@@ -122,7 +122,12 @@ if __name__ == "__main__":
 
     @job(array=len(years), **config["Compute"])
     def count(i: int) -> None:
-        r"""Count the days outside the bounds of the i-th year."""
+        r"""Count the days outside the bounds of the i-th year.
+
+        Arguments:
+            i : Index of the year.
+        """
+
         count_outside_bounds(years[i])
 
     @after(count)

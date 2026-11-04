@@ -102,7 +102,12 @@ if __name__ == "__main__":
 
     @job(array=len(chunks), **cluster["metrics"])
     def metrics(i: int) -> None:
-        r"""Forecast the i-th chunk of windows and save their metrics."""
+        r"""Forecast the i-th chunk of windows and save their metrics.
+
+        Arguments:
+            i : Index of the chunk of windows.
+        """
+
         compute_metrics(checkpoint_name, split, chunks[i], days, members, chunk, noise, job=i)
 
     @job(**cluster["forecasts"])
@@ -117,7 +122,12 @@ if __name__ == "__main__":
     @after(forecasts)
     @job(array=len(animate) * len(DATASET_VARIABLES), **cluster["figures"])
     def animations(i: int) -> None:
-        r"""Animate one variable of one animated window."""
+        r"""Animate one variable of one animated window.
+
+        Arguments:
+            i : Index of the animated window and variable.
+        """
+
         date, variable = starts[animate[i // len(DATASET_VARIABLES)]], DATASET_VARIABLES[i % len(DATASET_VARIABLES)]
         plot_animations(checkpoint_name, split, date, variable, config_animations["duration"])
 
@@ -133,7 +143,12 @@ if __name__ == "__main__":
     @after(metrics)
     @job(array=2, **cluster["figures"])
     def maps_figures(i: int) -> None:
-        r"""Aggregate and plot the maps of the first or last forecasted day."""
+        r"""Aggregate and plot the maps of the first or last forecasted day.
+
+        Arguments:
+            i : 0 for the first forecasted day, 1 for the last one.
+        """
+
         plot_score_maps(aggregate_maps(checkpoint_name, split, (1, days)[i], members), checkpoint_name, split, ("first", "last")[i])
 
     @after(animations, metrics_figures, maps_figures)
