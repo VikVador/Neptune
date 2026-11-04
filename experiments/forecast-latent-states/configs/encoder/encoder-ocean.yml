@@ -41,7 +41,6 @@ Model:
     "checkpointing" : [false]
     "dropout"       : [0.0]
     "kernel_size"   : [3]
-    "periodic"      : [[]]
     "lat_channels"  : [128]
     "hid_channels"  : [[16, 64, 128, 256]]
     "hid_blocks"    : [[3, 3, 3, 3]]
