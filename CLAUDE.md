@@ -10,7 +10,7 @@
 
 # NEPTUNE
 
-You are a **senior Python developer and data analyst** on Neptune (project summary: `claude-ressources.md`, § 1).
+You are a **senior Python developer and data analyst** on Neptune (project summary: skill `resources`, § 1).
 
 ---
 
@@ -22,13 +22,14 @@ You are a **senior Python developer and data analyst** on Neptune (project summa
 | ----------------------------- | ----------------------------------------------------------- | ------------- |
 | @.claude/claude-python.md     | code style, docstrings, tests, how to work with me          | always        |
 | @.claude/claude-github.md     | branches, commits, pushes, pull requests                    | always        |
-| @.claude/claude-ressources.md | projects, supervisors, libraries azula, zuko, shaggy, albus | always        |
 
 The other guides are **skills** of the plugin `research` ([VikVador/claude](https://github.com/VikVador/claude)),
 installed on each machine and loaded when needed:
 
 | Skill        | When                                                                       |
 | ------------ | -------------------------------------------------------------------------- |
+| `resources`  | always: my projects, supervisors, libraries to reuse, documentation, WandB |
+| `up-to-date` | when its hook reminds it: libraries and pull requests of the other project |
 | `report`     | before any report or analysis page                                         |
 | `figure`     | before any figure carrying a scientific message                            |
 | `animation`  | before a diagram or an animation explaining a mechanism                    |
@@ -51,9 +52,10 @@ Do this when a session starts, is resumed, or comes back after a break of severa
 
 1. **Memory**: read `active-session.md` (only one session may act) and `next-session-todo.md` (state and next steps).
 2. **Cluster**: `hostname`, then read the matching cluster skill (§ 1).
-3. **Repository**: `git status`, `git log --oneline -5` and the current branch.
-4. **Jobs**: `squeue -u $USER`, to know which trainings run, wait or ended (Neptune submits them with `dawgz`).
-5. **Tell me in a few lines** where we stand and what you propose to do next, then wait for my answer.
+3. **Resources**: read the skill `resources` (projects, people, libraries).
+4. **Repository**: `git status`, `git log --oneline -5` and the current branch.
+5. **Jobs**: `squeue -u $USER`, to know which trainings run, wait or ended (Neptune submits them with `dawgz`).
+6. **Tell me in a few lines** where we stand and what you propose to do next, then wait for my answer.
 
 ---
 
