@@ -71,7 +71,7 @@ def test_submit_resume_last(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_load_configuration_encoders() -> None:
-    r"""Determines if both encoders have a complete configuration, with whole validation batches."""
+    r"""Determines if the three encoders have a complete configuration, with whole validation batches."""
 
     folder = (
         Path(__file__).parents[1]
@@ -81,7 +81,7 @@ def test_load_configuration_encoders() -> None:
         / "encoder"
     )
 
-    for group in ("ocean", "surface"):
+    for group in ("ocean", "surface", "era5"):
         config = load_configuration(folder / f"encoder-{group}.yml")[0]
         training, cluster = config["Training"], config["Cluster"]
         samples_per_step = (

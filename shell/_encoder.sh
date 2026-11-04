@@ -4,9 +4,10 @@ cd "$(dirname "$0")/.."
 # Moving to the jobs directory
 cd experiments/forecast-latent-states/
 
-# Launching the trainings of the ocean and surface encoders
+# Launching the trainings of the ocean, surface and ERA5 encoders
 python -u encoders.py --config configs/encoder/encoder-ocean.yml
 python -u encoders.py --config configs/encoder/encoder-surface.yml
+python -u encoders.py --config configs/encoder/encoder-era5.yml
 
 # Moving back to the root directory
 cd ../../

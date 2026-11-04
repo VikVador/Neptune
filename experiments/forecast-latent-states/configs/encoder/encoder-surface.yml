@@ -41,11 +41,10 @@ Model:
     "checkpointing" : [false]
     "dropout"       : [0.0]
     "kernel_size"   : [3]
-    "lat_channels"  : [128]
-    "hid_channels"  : [[16, 32, 64, 128, 256]]
-    "hid_blocks"    : [[3, 3, 3, 3, 3]]
+    "lat_channels"  : [32]
+    "hid_channels"  : [[16, 32, 64, 128]]
+    "hid_blocks"    : [[3, 3, 3, 3]]
     "stride"        : [[
-        [2, 2],
         [2, 2],
         [2, 2],
         [2, 2],

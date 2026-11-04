@@ -21,6 +21,8 @@ __all__ = [
     "PATH_STATS",
     "PATH_STATS_INCREMENTS",
     "PATH_STATS_CONDITIONING",
+    "PATH_STATS_ERA5",
+    "PATH_STATS_ERA5_INCREMENTS",
     "PATH_MASK",
     "PATH_MASK_NEMO",
     "PATH_CONDITIONING",
@@ -81,3 +83,7 @@ PATH_STATS_CONDITIONING = {
     "monthly" : PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_conditioning_monthly.zarr",
     "daily"   : PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_conditioning_daily.zarr",
 }
+
+# Statistics of the ERA5 forcing and of its daily increments over the training period, for its encoder
+PATH_STATS_ERA5            = PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_states_cleaned.zarr"
+PATH_STATS_ERA5_INCREMENTS = PATH_DATASETS / "statistics" / "black_sea_era5_hr001_statistics_increments_cleaned.zarr"

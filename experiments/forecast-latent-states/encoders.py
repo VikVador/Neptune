@@ -28,7 +28,7 @@ import neptune.training
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
-from neptune.data.weights import get_weights_distance
+from neptune.data.weights import get_weights_distance, get_weights_distance_era5
 from neptune.model.encoders import Encoder
 from neptune.tools import (
     generate_run_name,
@@ -82,7 +82,7 @@ def forward_loss(
     Arguments:
         model         : Encoder, possibly wrapped by DDP.
         batch         : Single state, from NeptuneDataset.
-        group         : Group of variables, 'surface' or 'ocean'.
+        group         : Group of variables, 'surface', 'ocean' or 'era5' (the forcing of the same day).
         weights       : Weight σ/τ of each channel in the distances, (C, 1, 1) or (C, Z, 1, 1).
         device        : Target device.
         memory_format : Layout of the states in memory, the channels last during the training.
@@ -91,8 +91,8 @@ def forward_loss(
         loss : GME loss of the encoder.
     """
 
-    x_inp_s, x_inp_o, _, _, _, _ = batch
-    states = (x_inp_s if group == "surface" else x_inp_o)[:, 0].to(device, memory_format=memory_format)
+    x_inp_s, x_inp_o, _, _, c_inp, _ = batch
+    states = {"surface": x_inp_s, "ocean": x_inp_o, "era5": c_inp}[group][:, 0].to(device, memory_format=memory_format)
 
     with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
         z = model(states)
@@ -182,8 +182,11 @@ def training(
     model, config = _build_model(config_model, checkpoint_name, device)
 
     # Weight of each channel in the distances between states, computed once
-    weights_surface, weights_ocean = get_weights_distance(device=device)
-    weights = weights_surface if group == "surface" else weights_ocean
+    if group == "era5":
+        weights = get_weights_distance_era5(device=device)
+    else:
+        weights_surface, weights_ocean = get_weights_distance(device=device)
+        weights = weights_surface if group == "surface" else weights_ocean
 
     # Without the scaling, every channel weighs 1, except the constant levels that stay out of the distances
     if not scale_distances:

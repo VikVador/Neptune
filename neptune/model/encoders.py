@@ -1,4 +1,4 @@
-r"""Deterministic encoders of the surface and ocean states into latent grids."""
+r"""Deterministic encoders of the surface and ocean states, and of the ERA5 forcing, into latent grids."""
 
 __all__ = [
     "Encoder",
@@ -13,6 +13,7 @@ from torch import Tensor
 from typing import Any
 
 from neptune.data import (
+    DATASET_CONDITIONING,
     DATASET_VARIABLES_OCEAN,
     DATASET_VARIABLES_SURFACE,
     X,
@@ -28,6 +29,7 @@ from neptune.data.weights import get_weights_mesh
 GROUPS = {
     "surface" : (DATASET_VARIABLES_SURFACE, (Y, X)),
     "ocean"   : (DATASET_VARIABLES_OCEAN,   (Z, Y, X)),
+    "era5"    : (DATASET_CONDITIONING,      (Y, X)),
 }
 # fmt: on
 
@@ -36,7 +38,7 @@ class Encoder(nn.Module):
     r"""Creates the deterministic encoder of a group of variables, its states stacked with the mesh of its grid.
 
     Arguments:
-        group        : Group of variables, 'surface' or 'ocean'.
+        group        : Group of variables, 'surface', 'ocean' or 'era5' (the forcing).
         lat_channels : Number of latent channels C_z.
         config       : Keyword arguments of the ConvEncoder (hid_channels, stride, ...).
     """
@@ -50,7 +52,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         # Security
-        assert group in GROUPS, f"ERROR - group must be 'surface' or 'ocean', got {group}."
+        assert group in GROUPS, f"ERROR - group must be 'surface', 'ocean' or 'era5', got {group}."
 
         self.group = group
         self.lat_channels = lat_channels
@@ -58,7 +60,7 @@ class Encoder(nn.Module):
 
         # The sin/cos mesh is rebuilt at loading (not saved)
         mesh_surface, mesh_ocean = get_weights_mesh()
-        static = mesh_surface if group == "surface" else mesh_ocean
+        static = mesh_ocean if group == "ocean" else mesh_surface
         self.register_buffer("static", static, persistent=False)
 
         # The date is not an input: two identical states would otherwise get different latents

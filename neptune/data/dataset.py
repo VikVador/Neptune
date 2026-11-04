@@ -37,6 +37,7 @@ from neptune.data.weights import (
     get_weights_mask,
     get_weights_stats,
     get_weights_stats_conditioning,
+    get_weights_stats_era5,
 )
 
 
@@ -126,7 +127,8 @@ class NeptuneDataset(Dataset):
         output_states  : Number of future states K to predict.
         standardized   : If True, standardize each variable using statistics.
         fill_with_nans : If True, land pixels are set to NaN instead of 0.
-        group          : Group of variables to load, 'surface' or 'ocean', or None for both (the other one being empty).
+        group          : Group of variables to load, 'surface', 'ocean' or 'era5' (the forcing alone), or None for the
+                         surface and ocean states (the groups not loaded being empty).
     """
 
     def __init__(
@@ -144,8 +146,8 @@ class NeptuneDataset(Dataset):
         # Security
         assert_date_format(date_start)
         assert_date_format(date_end)
-        valid = group in (None, "surface", "ocean")
-        assert valid, f"ERROR - group must be 'surface', 'ocean' or None, got {group}."
+        valid = group in (None, "surface", "ocean", "era5")
+        assert valid, f"ERROR - group must be 'surface', 'ocean', 'era5' or None, got {group}."
 
         self.input_states = input_states
         self.output_states = output_states
@@ -157,7 +159,10 @@ class NeptuneDataset(Dataset):
         # The statistics are only needed to standardize, and are computed from unstandardized datasets
         if standardized:
             self.stats = get_weights_stats()
-            self.stats_conditioning = get_weights_stats_conditioning()
+            # The encoder of the forcing uses its global statistics, FGN its daily ones
+            self.stats_conditioning = (
+                get_weights_stats_era5() if group == "era5" else get_weights_stats_conditioning()
+            )
 
         self.date_to_paths = get_paths_by_date()
         self.dates = sorted(d for d in self.date_to_paths if date_start <= d <= date_end)
@@ -378,6 +383,10 @@ class NeptuneDataset(Dataset):
             x_o : Ocean state (C_o, Z, Y, X), empty if not loaded.
         """
 
+        # The encoder of the forcing reads no state
+        if self.group == "era5":
+            return torch.empty(0), torch.empty(0)
+
         surface, ocean = self.group in (None, "surface"), self.group in (None, "ocean")
         x_s, x_o = load_states(self.date_to_paths[date], surface, ocean)
 
@@ -425,7 +434,7 @@ def get_datasets(
         output_states  : Number of future states K to predict.
         standardized   : If True, standardize each variable using precomputed statistics.
         fill_with_nans : If True, land pixels are set to NaN instead of 0.
-        group          : Group of variables to load, 'surface' or 'ocean', or None for both.
+        group          : Group of variables to load, 'surface', 'ocean' or 'era5', or None for both states.
 
     Returns:
         train : Training dataset

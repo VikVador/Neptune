@@ -3,8 +3,15 @@ r"""Tests for neptune.model.encoders."""
 import pytest
 import torch
 
-from neptune.data import DATASET_VARIABLES_OCEAN, DATASET_VARIABLES_SURFACE, X, Y, Z
-from neptune.data.weights import get_weights_distance
+from neptune.data import (
+    DATASET_CONDITIONING,
+    DATASET_VARIABLES_OCEAN,
+    DATASET_VARIABLES_SURFACE,
+    X,
+    Y,
+    Z,
+)
+from neptune.data.weights import get_weights_distance, get_weights_distance_era5
 from neptune.model.encoders import Encoder
 
 CONFIG = {
@@ -48,6 +55,17 @@ def test_encoder_float32_inputs() -> None:
 
 
 @pytest.mark.integration
+def test_encoder_era5() -> None:
+    r"""Determines if the encoder of the ERA5 forcing maps it onto the latent grid of the surface, with its mesh."""
+
+    era5, surface = Encoder("era5", **CONFIG), Encoder("surface", **CONFIG)
+    z = era5(torch.randn(2, len(DATASET_CONDITIONING), Y, X))
+
+    assert z.shape == (2, 8, *surface.shape)
+    assert torch.equal(era5.static, surface.static)
+
+
+@pytest.mark.integration
 def test_encoder_wrong_group() -> None:
     r"""Determines if an unknown group of variables is rejected."""
 
@@ -65,3 +83,13 @@ def test_get_weights_distance_typical() -> None:
     assert weights_ocean.shape == (len(DATASET_VARIABLES_OCEAN), Z, 1, 1)
     assert (weights_surface > 0).all() and (weights_ocean >= 0).all()
     assert weights_ocean[DATASET_VARIABLES_OCEAN.index("votemper")].min() > 1
+
+
+@pytest.mark.integration
+def test_get_weights_distance_era5_typical() -> None:
+    r"""Determines if every forcing variable gets a positive weight, one day of change weighing less than its std."""
+
+    weights = get_weights_distance_era5()
+
+    assert weights.shape == (len(DATASET_CONDITIONING), 1, 1)
+    assert (weights > 1).all()

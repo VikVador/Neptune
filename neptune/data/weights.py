@@ -7,10 +7,12 @@ __all__ = [
     "get_weights_conditioning",
     "get_weights_stats",
     "get_weights_stats_conditioning",
+    "get_weights_stats_era5",
     "get_weights_increments",
     "get_weights_bounds",
     "get_weights_loss",
     "get_weights_distance",
+    "get_weights_distance_era5",
 ]
 
 import math
@@ -28,6 +30,8 @@ from neptune.config import (
     PATH_MASK,
     PATH_STATS,
     PATH_STATS_CONDITIONING,
+    PATH_STATS_ERA5,
+    PATH_STATS_ERA5_INCREMENTS,
     PATH_STATS_INCREMENTS,
 )
 from neptune.data import (
@@ -392,6 +396,30 @@ def get_weights_stats_conditioning(
     return _prepare(mean, dim, device), _prepare(std, dim, device)
 
 
+def get_weights_stats_era5(
+    *,
+    dim: int = 1,
+    device: torch.device | str | None = None,
+) -> tuple[Tensor, Tensor]:
+    r"""Load the global statistics of the ERA5 forcing over the training period, used by its encoder.
+
+    Arguments:
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
+        device : Target device ("cpu" or "cuda").
+
+    Returns:
+        mean_era5 : Mean of each forcing variable (C_c, 1, 1).
+        std_era5  : Standard deviation of each forcing variable (C_c, 1, 1).
+    """
+
+    stats = np.stack([_stats_array(PATH_STATS_ERA5, var) for var in DATASET_CONDITIONING])
+    stats = torch.tensor(stats, dtype=torch.float32)  # (C_c, 2)
+
+    return _prepare(stats[:, 0, None, None], dim, device), _prepare(
+        stats[:, 1, None, None], dim, device
+    )
+
+
 def get_weights_increments(
     *,
     dim: int = 1,
@@ -518,3 +546,27 @@ def get_weights_distance(
         _prepare(torch.where(constant_surface, 0.0, 1 / std_inc_surface), dim, device),
         _prepare(torch.where(constant_ocean, 0.0, 1 / std_inc_ocean), dim, device),
     )
+
+
+def get_weights_distance_era5(
+    *,
+    dim: int = 1,
+    device: torch.device | str | None = None,
+) -> Tensor:
+    r"""Compute the weight of each ERA5 forcing variable in the distance between standardized fields.
+
+    Arguments:
+        dim    : Use 2 to add a leading batch dimension, 1 otherwise.
+        device : Target device ("cpu" or "cuda").
+
+    Returns:
+        weights_era5 : Weight σ/τ of each forcing variable (C_c, 1, 1).
+    """
+
+    std = np.stack([_stats_array(PATH_STATS_ERA5, var)[1] for var in DATASET_CONDITIONING])
+    std_increments = np.stack([
+        _stats_array(PATH_STATS_ERA5_INCREMENTS, var)[1] for var in DATASET_CONDITIONING
+    ])
+    weights = torch.tensor(std / std_increments, dtype=torch.float32)[:, None, None]
+
+    return _prepare(weights, dim, device)
