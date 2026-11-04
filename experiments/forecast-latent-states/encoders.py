@@ -8,10 +8,11 @@ import torch.distributed as dist
 import wandb
 
 from omegaconf import OmegaConf
+from pathlib import Path
 from shaggy.loss import loss_geometry_embedding
 from shaggy.optimizers.gradients import safe_gradient_step
 from shaggy.optimizers.soap import SOAP
-from shaggy.tools import load, load_config, save
+from shaggy.tools import load, load_config, load_weights, save
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -20,6 +21,7 @@ import neptune.data.dataloader
 import neptune.data.dataset
 import neptune.data.weights
 import neptune.model.encoders
+import neptune.training
 
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
@@ -33,6 +35,7 @@ from neptune.tools import (
     load_configuration,
     schedule_training,
 )
+from neptune.training import get_run_id, has_stagnated, load_state, save_state, submit_resume
 
 
 # fmt: off
@@ -105,15 +108,19 @@ def training(
     r"""Launch the training of the encoder of a group of variables.
 
     Arguments:
-        config_state    : Saving option and checkpoint to resume from.
-        config_training : Batch sizes, optimizer steps and learning rate schedule.
+        config_state    : Saving option, checkpoint to resume from and whether its optimizer state is resumed too.
+        config_training : Batch sizes, optimizer steps, learning rate schedule, validation and stopping.
         config_model    : Group of variables, latent channels and architecture of the encoder.
         config_wandb    : Weights & Biases entity, project and mode.
-        config_cluster  : Slurm resources, logged alongside the run for traceability.
+        config_cluster  : Slurm resources and number of jobs that may resume the training after the first one.
     """
 
     # Initialize distributed setup
     rank, local_rank, world_size, device, is_distributed = setup_distributed()
+
+    # A job stopped by its time limit leaves the next one waiting in the queue, which resumes the same run
+    if rank == 0:
+        submit_resume(config_cluster["restarts"])
 
     # Prevent xarray/dask deadlocks inside DataLoader workers
     dask.config.set(scheduler="synchronous")
@@ -123,10 +130,15 @@ def training(
     (
         saving,
         checkpoint_name,
+        resume_optimizer,
         steps_update,
         steps_logging,
         steps_validation,
-        batches_validation,
+        steps_checkpoint,
+        samples_validation,
+        stopping_window,
+        stopping_threshold,
+        scale_distances,
         batch_size_per_step,
         batch_size_per_gpu,
         num_workers,
@@ -138,10 +150,15 @@ def training(
     ) = (
         config_state["saving"],
         config_state["checkpoint_name"],
+        config_state["resume_optimizer"],
         config_training["steps_update"],
         config_training["steps_logging"],
         config_training["steps_validation"],
-        config_training["batches_validation"],
+        config_training["steps_checkpoint"],
+        config_training["samples_validation"],
+        config_training["stopping_window"],
+        config_training["stopping_threshold"],
+        config_training["scale_distances"],
         config_training["batch_size_per_step"],
         config_training["batch_size_per_gpu"],
         config_training["num_workers"],
@@ -154,6 +171,9 @@ def training(
 
     # Security
     assert batch_size_per_gpu > 1, f"ERROR - The GME loss pairs the samples of a GPU, batch_size_per_gpu must be > 1, got {batch_size_per_gpu}."
+    # Each GPU reads its share of the fixed days, whole batches only: any other number would drop days without a word
+    samples_per_step = batch_size_per_gpu * world_size
+    assert samples_validation % samples_per_step == 0, f"ERROR - samples_validation counts the days of all the GPUs, it must be a multiple of {samples_per_step}, got {samples_validation}."
 
     # The model is loaded from a checkpoint or built from scratch
     model, config = _build_model(config_model, checkpoint_name, device)
@@ -162,13 +182,34 @@ def training(
     weights_surface, weights_ocean = get_weights_distance(device=device)
     weights = weights_surface if group == "surface" else weights_ocean
 
-    # The Weights & Biases run is named after the architecture
-    run_name = generate_run_name(f"ENC_{group}_lc{model.lat_channels}_tk{model.tokens}", checkpoint_name)
+    # Without the scaling, every channel weighs 1, except the constant levels that stay out of the distances
+    if not scale_distances:
+        weights = (weights > 0).float()
+
+    # The Weights & Biases run is named after the architecture, the jobs of a same training sharing its name
+    previous_name = None if checkpoint_name is None else Path(checkpoint_name).parts[0]
+    run_name      = generate_run_name(f"ENC_{group}_lc{model.lat_channels}_tk{model.tokens}", previous_name, get_run_id())
+    run_path      = PATH_MODELS / run_name
+
+    # A job restarted after a crash or a time limit always resumes exactly where its run stopped
+    state_path = run_path / "last" / "state.pt"
+    state      = None
+    if state_path.exists():
+        state = load_state(state_path, device)
+        model = load_weights(model, run_path / "last", device=str(device)).train()
+        if rank == 0:
+            print(f"Resuming {run_name} at update {state['optimizer_step']}", flush=True)
+    elif checkpoint_name is not None and resume_optimizer:
+        state_path_resumed = PATH_MODELS / checkpoint_name / "state.pt"
+        assert state_path_resumed.exists(), f"ERROR - No optimizer state in {checkpoint_name}, use its last/ folder or resume_optimizer: false."
+        state = load_state(state_path_resumed, device)
 
     if rank == 0:
         wandb.init(
             **config_wandb,
             name=run_name,
+            id=run_name,
+            resume="allow",
             config={
                 "State"           : config_state,
                 "Training"        : config_training,
@@ -181,16 +222,17 @@ def training(
             "Informations/Trainable Parameters [M]" : sum(p.numel() for p in model.parameters()) / 1e6,
             "Informations/Tokens"                   : model.tokens,
         })
+        wandb.define_metric("*", step_metric="Informations/Steps Update")
     else:
         wandb.init(mode="disabled")
 
+    # The updates redone after a resume are not logged again, so that the curves continue from their last point
+    update_logged = wandb.run.summary.get("Informations/Steps Update", 0) if rank == 0 else 0
+
     # Number of steps to accumulate gradients before updating model parameters
     steps_gradient_accumulation = max(1, math.ceil(batch_size_per_step / (batch_size_per_gpu * world_size)))
-    batches = [
-        steps_update * steps_gradient_accumulation,
-        steps_update // steps_validation * batches_validation,
-        None,
-    ]
+    optimizer_step              = 0 if state is None else state["optimizer_step"]
+    batches                     = [(steps_update - optimizer_step) * steps_gradient_accumulation, None, None]
 
     # Each sample is a single state of the group
     dataloader_training, dataloader_validation, _ = get_dataloaders(
@@ -198,11 +240,13 @@ def training(
         num_workers     = num_workers,
         prefetch_factor = prefetch_factor,
         batches         = batches,
-        shuffle         = [True, True, False],
-        infinite        = [True, True, False],
+        shuffle         = [True, False, False],
+        infinite        = [True, False, False],
         rank            = rank,
         world_size      = world_size,
         is_distributed  = is_distributed,
+        samples_validation = samples_validation,
+        seed            = optimizer_step,
         input_states    = 1,
         output_states   = 0,
         group           = group,
@@ -229,11 +273,21 @@ def training(
         total_steps  = steps_update,
     )
 
+    # The learning rate schedule and the moments of the optimizer come back with a state, not with the weights alone
+    if state is not None:
+        optimizer.load_state_dict(state["optimizer"])
+        scheduler.load_state_dict(state["scheduler"])
+
     loss_accumulator         = 0.0
     loss_logging_accumulator = 0.0
-    loss_validation_best     = float("inf")
+    loss_training_window     = 0.0
+    updates_training_window  = 0
     gradient_norm            = float("inf")
-    optimizer_step           = 0
+    samples_seen             = 0   if state is None else state["samples_seen"]
+    losses_validation        = []  if state is None else state["losses_validation"]
+    loss_validation_best     = float("inf") if state is None else state["loss_validation_best"]
+    loss_training_best       = float("inf") if state is None else state["loss_training_best"]
+    raw_model                = model.module if hasattr(model, "module") else model
 
     # Waiting for processes to be ready
     if is_distributed:
@@ -243,6 +297,7 @@ def training(
 
         # Forward pass and loss
         loss = forward_loss(model, batch, group, weights, device)
+        samples_seen += batch_size_per_gpu * world_size
 
         # Gradient accumulation
         loss              = loss / steps_gradient_accumulation
@@ -267,6 +322,8 @@ def training(
         gradient_norm             = safe_gradient_step(optimizer=optimizer, grad_clip=1.0)
         loss_step                 = loss_accumulator
         loss_logging_accumulator += loss_accumulator
+        loss_training_window     += loss_accumulator
+        updates_training_window  += 1
         loss_accumulator          = 0.0
         optimizer_step           += 1
         scheduler.step()
@@ -283,37 +340,73 @@ def training(
             if is_distributed:
                 loss_mean = reduce_mean(loss_mean, device)
 
-            if rank == 0:
+            if rank == 0 and optimizer_step > update_logged:
                 wandb.log({
                     "Training/Loss"              : loss_mean,
                     "Informations/Steps Update"  : optimizer_step,
-                    "Informations/Samples Seen"  : (step + 1) * batch_size_per_gpu * world_size,
+                    "Informations/Samples Seen"  : samples_seen,
                     "Informations/Gradient Norm" : gradient_norm,
                     "Informations/Learning Rate" : scheduler.get_last_lr()[0],
                 })
 
-        # Validation, and saving the best model
+        # Validation, on the same days each time, and saving the best models
+        stop = False
         if optimizer_step % steps_validation == 0:
             model.eval()
             loss_validation = 0.0
             with torch.no_grad():
-                for _ in range(batches_validation):
-                    loss_validation += forward_loss(model, next(dataloader_validation), group, weights, device).item() / batches_validation
+                for batch in dataloader_validation:
+                    loss_validation += forward_loss(model, batch, group, weights, device).item() / len(dataloader_validation)
             model.train()
+
+            # The training loss of one batch is noisy, the mean since the last validation is what gets compared
+            loss_training           = loss_training_window / updates_training_window
+            loss_training_window    = 0.0
+            updates_training_window = 0
 
             if is_distributed:
                 loss_validation = reduce_mean(loss_validation, device)
+                loss_training   = reduce_mean(loss_training, device)
+
+            losses_validation.append(loss_validation)
 
             if rank == 0:
-                wandb.log({
-                    "Validation/Loss"           : loss_validation,
-                    "Informations/Steps Update" : optimizer_step,
-                })
+                # A job can stop during a validation, after logging the training loss of this same update
+                if optimizer_step >= update_logged:
+                    wandb.log({
+                        "Validation/Loss"           : loss_validation,
+                        "Informations/Steps Update" : optimizer_step,
+                    })
 
                 if saving and loss_validation < loss_validation_best:
-                    raw_model            = model.module if hasattr(model, "module") else model
-                    loss_validation_best = loss_validation
-                    save(raw_model, config, PATH_MODELS / run_name)
+                    save(raw_model, config, run_path / "best-validation")
+                if saving and loss_training < loss_training_best:
+                    save(raw_model, config, run_path / "best-training")
+
+            loss_validation_best = min(loss_validation_best, loss_validation)
+            loss_training_best   = min(loss_training_best, loss_training)
+
+            # Every process reads the same reduced losses, so that they all stop at the same update
+            stop = stopping_window is not None and has_stagnated(losses_validation, stopping_window, stopping_threshold)
+
+        # Everything needed to resume from this exact update, also written at the very end to continue a finished run
+        is_last = stop or optimizer_step == steps_update
+        if saving and rank == 0 and (optimizer_step % steps_checkpoint == 0 or is_last):
+            save(raw_model, config, run_path / "last")
+            save_state(state_path, {
+                "optimizer_step"       : optimizer_step,
+                "samples_seen"         : samples_seen,
+                "optimizer"            : optimizer.state_dict(),
+                "scheduler"            : scheduler.state_dict(),
+                "losses_validation"    : losses_validation,
+                "loss_validation_best" : loss_validation_best,
+                "loss_training_best"   : loss_training_best,
+            })
+
+        if stop:
+            if rank == 0:
+                wandb.log({"Informations/Stopped Early": 1, "Informations/Steps Update": optimizer_step})
+            break
 
     # Closing run
     wandb.finish()
@@ -372,5 +465,6 @@ if __name__ == "__main__":
                 neptune.data.weights,
                 neptune.data.dataloader,
                 neptune.model.encoders,
+                neptune.training,
             ],
         )

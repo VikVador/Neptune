@@ -10,6 +10,7 @@ __all__ = [
 ]
 
 import cloudpickle
+import hashlib
 import secrets
 import yaml
 
@@ -54,18 +55,26 @@ def load_configuration(path: str | Path) -> list[dict[str, Any]]:
     return _generate_combinations(config)
 
 
-def generate_run_name(name: str, previous_run_name: str | None = None) -> str:
-    r"""Generate a unique WandB run name, from a descriptive name of the model and a random hash.
+def generate_run_name(
+    name: str,
+    previous_run_name: str | None = None,
+    run_id: str | None = None,
+) -> str:
+    r"""Generate a WandB run name, from a descriptive name of the model and a hash.
 
     Arguments:
         name              : Descriptive name of the model, e.g. 'ENC_surface_lc128_tk576'.
         previous_run_name : WandB name of the resumed run, if any.
+        run_id            : Identifier shared by the jobs of a same training, giving them the same name (random if None).
 
     Returns:
         run_name : Run name of the form {name}__XXX[_YYY], XXX identifying this run and YYY the resumed one.
     """
 
-    run_name = f"{name}__{secrets.token_hex(2).upper()}"
+    run_hash = (
+        secrets.token_hex(2) if run_id is None else hashlib.sha256(run_id.encode()).hexdigest()[:4]
+    )
+    run_name = f"{name}__{run_hash.upper()}"
 
     if previous_run_name is not None:
         run_name = f"{run_name}_{extract_model_hash(previous_run_name)}"

@@ -55,3 +55,20 @@ def test_infinite_dataloader_typical() -> None:
 
     loader = DataLoader(TensorDataset(torch.arange(4).float()), batch_size=2)
     assert len(list(infinite_dataloader(loader, batches=7))) == 7
+
+
+def test_get_dataloaders_fixed_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    r"""Determines if the validation keeps the same samples, in the same order, whatever the seed of the training."""
+
+    datasets = tuple(TensorDataset(torch.arange(n).float()) for n in (8, 8, 8))
+    monkeypatch.setattr("neptune.data.dataloader.get_datasets", lambda **kwargs: datasets)
+
+    first = get_dataloaders(
+        batch_size=2, num_workers=0, prefetch_factor=1, samples_validation=4, seed=0
+    )[1]
+    second = get_dataloaders(
+        batch_size=2, num_workers=0, prefetch_factor=1, samples_validation=4, seed=5
+    )[1]
+
+    assert len(first.dataset) == 4
+    assert [b[0].tolist() for b in first] == [b[0].tolist() for b in second]

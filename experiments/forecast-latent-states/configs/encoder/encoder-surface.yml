@@ -11,18 +11,24 @@ Cluster:
     "cpus-per-node" : [32]
     "gpus-per-node" : [4]
     "ram-per-node"  : ["240GB"]
+    "restarts"      : [3]
 
 State:
-    "saving"          : [true]
-    "checkpoint_name" : [null]
+    "saving"           : [true]
+    "checkpoint_name"  : [null]
+    "resume_optimizer" : [true]
 
 Training:
     "batch_size_per_step" : [128]
     "batch_size_per_gpu"  : [8]
-    "batches_validation"  : [4]
+    "samples_validation"  : [512]
     "steps_update"        : [16384]
     "steps_logging"       : [4]
-    "steps_validation"    : [64]
+    "steps_validation"    : [256]
+    "steps_checkpoint"    : [256]
+    "stopping_window"     : [10]
+    "stopping_threshold"  : [0.01]
+    "scale_distances"     : [true]
     "num_workers"         : [7]
     "prefetch_factor"     : [1]
     "warmup_steps"        : [1024]
