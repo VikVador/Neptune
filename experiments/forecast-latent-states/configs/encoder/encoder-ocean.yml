@@ -38,7 +38,7 @@ Training:
 
 Model:
     "group"         : ["ocean"]
-    "checkpointing" : [true]
+    "checkpointing" : [false]
     "dropout"       : [0.0]
     "kernel_size"   : [[5, 3, 3]]
     "lat_channels"  : [256]
