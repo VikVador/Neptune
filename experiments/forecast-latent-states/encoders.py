@@ -9,10 +9,13 @@ import wandb
 
 from omegaconf import OmegaConf
 from pathlib import Path
+from shaggy.distributed import reduce_mean, setup_distributed
 from shaggy.loss import loss_geometry_embedding
 from shaggy.optimizers.gradients import safe_gradient_step
 from shaggy.optimizers.soap import SOAP
+from shaggy.schedulers import warmup_cosine_decay
 from shaggy.tools import load, load_config, load_weights, save
+from shaggy.training import has_stagnated, load_state, save_state
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -26,16 +29,14 @@ import neptune.training
 from neptune.config import PATH_MODELS
 from neptune.data.dataloader import get_dataloaders
 from neptune.data.weights import get_weights_distance
-from neptune.distributed import reduce_mean, setup_distributed
 from neptune.model.encoders import Encoder
-from neptune.schedulers import warmup_cosine_decay
 from neptune.tools import (
     generate_run_name,
     get_wandb_hyperparameters,
     load_configuration,
     schedule_training,
 )
-from neptune.training import get_run_id, has_stagnated, load_state, save_state, submit_resume
+from neptune.training import get_run_id, submit_resume
 
 
 # fmt: off
@@ -69,27 +70,29 @@ def _build_model(
 
 
 def forward_loss(
-    model   : torch.nn.Module,
-    batch   : tuple,
-    group   : str,
-    weights : Tensor,
-    device  : torch.device,
+    model         : torch.nn.Module,
+    batch         : tuple,
+    group         : str,
+    weights       : Tensor,
+    device        : torch.device,
+    memory_format : torch.memory_format,
 ) -> Tensor:
     r"""Encode the states of a batch and compute the GME loss between the states and their latents.
 
     Arguments:
-        model   : Encoder, possibly wrapped by DDP.
-        batch   : Single state, from NeptuneDataset.
-        group   : Group of variables, 'surface' or 'ocean'.
-        weights : Weight σ/τ of each channel in the distances, (C, 1, 1) or (C, Z, 1, 1).
-        device  : Target device.
+        model         : Encoder, possibly wrapped by DDP.
+        batch         : Single state, from NeptuneDataset.
+        group         : Group of variables, 'surface' or 'ocean'.
+        weights       : Weight σ/τ of each channel in the distances, (C, 1, 1) or (C, Z, 1, 1).
+        device        : Target device.
+        memory_format : Layout of the states in memory, the channels last during the training.
 
     Returns:
         loss : GME loss of the encoder.
     """
 
     x_inp_s, x_inp_o, _, _, _, _ = batch
-    states = (x_inp_s if group == "surface" else x_inp_o)[:, 0].to(device)
+    states = (x_inp_s if group == "surface" else x_inp_o)[:, 0].to(device, memory_format=memory_format)
 
     with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
         z = model(states)
@@ -236,21 +239,32 @@ def training(
 
     # Each sample is a single state of the group
     dataloader_training, dataloader_validation, _ = get_dataloaders(
-        batch_size      = batch_size_per_gpu,
-        num_workers     = num_workers,
-        prefetch_factor = prefetch_factor,
-        batches         = batches,
-        shuffle         = [True, False, False],
-        infinite        = [True, False, False],
-        rank            = rank,
-        world_size      = world_size,
-        is_distributed  = is_distributed,
+        batch_size         = batch_size_per_gpu,
+        num_workers        = num_workers,
+        prefetch_factor    = prefetch_factor,
+        batches            = batches,
+        shuffle            = [True, False, False],
+        infinite           = [True, False, False],
+        rank               = rank,
+        world_size         = world_size,
+        is_distributed     = is_distributed,
         samples_validation = samples_validation,
-        seed            = optimizer_step,
-        input_states    = 1,
-        output_states   = 0,
-        group           = group,
+        seed               = optimizer_step,
+        input_states       = 1,
+        output_states      = 0,
+        group              = group,
     )
+
+    # The convolutions run faster in bfloat16 with the channels last, a layout of the training only: the shapes do
+    # not change, and a saved encoder loads back with the usual layout
+    spatial       = len(model.shape)
+    memory_format = torch.channels_last if spatial == 2 else torch.channels_last_3d
+    for parameter in model.parameters():
+        if parameter.dim() == spatial + 2:
+            parameter.data = parameter.data.contiguous(memory_format=memory_format)
+
+    # The network is compiled at its first batch, its normalizations and activations fused around the convolutions
+    model.compile()
 
     # Masks and meshes are identical on every process, so they are not broadcast
     if is_distributed:
@@ -296,7 +310,7 @@ def training(
     for step, batch in enumerate(dataloader_training):
 
         # Forward pass and loss
-        loss = forward_loss(model, batch, group, weights, device)
+        loss = forward_loss(model, batch, group, weights, device, memory_format)
         samples_seen += batch_size_per_gpu * world_size
 
         # Gradient accumulation
@@ -356,7 +370,7 @@ def training(
             loss_validation = 0.0
             with torch.no_grad():
                 for batch in dataloader_validation:
-                    loss_validation += forward_loss(model, batch, group, weights, device).item() / len(dataloader_validation)
+                    loss_validation += forward_loss(model, batch, group, weights, device, memory_format).item() / len(dataloader_validation)
             model.train()
 
             # The training loss of one batch is noisy, the mean since the last validation is what gets compared
