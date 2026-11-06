@@ -10,7 +10,7 @@
 
 # PYTHON
 
-Read this file **before writing or changing any code**. Libraries and projects to know: the skill `resources`.
+Read this file **before writing or changing any code**. Libraries and projects to know: the skill `research`.
 
 **Contents**
 
