@@ -8,6 +8,7 @@ import subprocess
 import time
 import xarray as xr
 
+from concurrent.futures import ThreadPoolExecutor
 from errors import (
     CORRECTIONS,
     HYPOXIA_BINS,
@@ -232,6 +233,7 @@ def compute_run(run: str, files: list[tuple[str, int]]) -> None:
 
     forecast, persistence, status, corrections, surface, volume = [], [], [], [], [], []
     initial, previous = None, None
+    pool = ThreadPoolExecutor(2)
     for date in run_dates(run):
         entries = by_date.get(date, {})
         ok = len(entries) == 4 and wait_for(
@@ -256,13 +258,20 @@ def compute_run(run: str, files: list[tuple[str, int]]) -> None:
 
         status.append(2 if copied else 0)
         corrections.append(counts)
-        forecast.append(None if copied else compare_all(f, o, c, date))
-        persistence.append(None if copied else compare_all(initial, o, c, date))
+        # The forecast and its persistence are compared at the same time, numpy releasing the GIL
+        days = (
+            [None, None]
+            if copied
+            else [
+                x.result() for x in [pool.submit(compare_all, g, o, c, date) for g in (f, initial)]
+            ]
+        )
+        forecast.append(days[0]), persistence.append(days[1])
         surface.append(
             np.stack([
                 (f[n] - o[n])[..., 0, :, :] if f[n].ndim == 3 else f[n] - o[n]
                 for n in DATASET_VARIABLES
-            ]).astype(np.float16)
+            ]).astype(np.float32)
         )
         if run in RUNS_MAPS_3D:
             volume.append(
@@ -275,7 +284,7 @@ def compute_run(run: str, files: list[tuple[str, int]]) -> None:
                         constant_values=np.nan,
                     )
                     for n in DATASET_VARIABLES
-                ]).astype(np.float16)
+                ]).astype(np.float32)
             )
         for p, _ in entries.values():
             p.unlink()
@@ -293,7 +302,7 @@ def compute_run(run: str, files: list[tuple[str, int]]) -> None:
         for k, v in to_datasets(fill(persistence), "lead", leads).items()
     }
 
-    nan = np.full(next(x for x in surface if x is not None).shape, np.nan, dtype=np.float16)
+    nan = np.full(next(x for x in surface if x is not None).shape, np.nan, dtype=np.float32)
     groups["forecast/vs_reanalysis"] = (
         groups["forecast/vs_reanalysis"]
         .assign(
@@ -312,7 +321,7 @@ def compute_run(run: str, files: list[tuple[str, int]]) -> None:
         coords={"lead": leads, "variable": DATASET_VARIABLES},
     )
     if volume:
-        nan3 = np.full(next(x for x in volume if x is not None).shape, np.nan, dtype=np.float16)
+        nan3 = np.full(next(x for x in volume if x is not None).shape, np.nan, dtype=np.float32)
         groups["forecast/maps"]["volume_error"] = (
             ("lead", "variable", "z", "y", "x"),
             np.stack([x if x is not None else nan3 for x in volume]),

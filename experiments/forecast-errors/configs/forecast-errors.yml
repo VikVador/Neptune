@@ -30,9 +30,9 @@ Cluster:
   "runs":
     "account"   : ["bsmfc"]
     "partition" : ["shared"]
-    "time"      : ["01:00:00"]
+    "time"      : ["00:45:00"]
     "cpus"      : [4]
-    "ram"       : ["16GB"]
+    "ram"       : ["20GB"]
 
   "aggregation":
     "account"   : ["bsmfc"]
