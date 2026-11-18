@@ -85,23 +85,25 @@ def save(
     unit = rank[op["unit"]]
     sort = np.argsort(unit, kind="stable")
 
-    path = PATH_OBSERVATIONS / "prepared"
+    # One array per file, read on demand by the comparisons (memory-mapped)
+    path = PATH_OBSERVATIONS / "prepared" / product
     path.mkdir(parents=True, exist_ok=True)
-    np.savez(
-        path / f"{product}.npz",
-        variable     = variable,
-        origin       = ORIGIN,
-        anomaly      = anomaly,
-        subsets      = np.array(names),
-        unit_day     = units["day"][order].astype(np.int32),
-        unit_value   = units["value"][order].astype(np.float64),
-        unit_area    = units["area"][order].astype(np.float64),
-        unit_pass    = units["pass"][order].astype(np.int64),
-        unit_subsets = units["subsets"][order].astype(bool),
-        op_unit      = unit[sort].astype(np.int64),
-        op_cell      = op["cell"][sort].astype(np.int64),
-        op_weight    = op["weight"][sort].astype(np.float64),
-    )  # fmt: skip
+    arrays = {
+        "variable"     : np.array(variable),
+        "origin"       : np.array(ORIGIN),
+        "anomaly"      : np.array(anomaly),
+        "subsets"      : np.array(names),
+        "unit_day"     : units["day"][order].astype(np.int32),
+        "unit_value"   : units["value"][order].astype(np.float64),
+        "unit_area"    : units["area"][order].astype(np.float64),
+        "unit_pass"    : units["pass"][order].astype(np.int64),
+        "unit_subsets" : units["subsets"][order].astype(bool),
+        "op_unit"      : unit[sort].astype(np.int64),
+        "op_cell"      : op["cell"][sort].astype(np.int64),
+        "op_weight"    : op["weight"][sort].astype(np.float64),
+    }  # fmt: skip
+    for name, x in arrays.items():
+        np.save(path / f"{name}.npy", x)
 
 
 def prepare_gridded(product: str) -> None:

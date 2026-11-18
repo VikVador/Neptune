@@ -419,8 +419,9 @@ def load_product(product: str) -> dict[str, np.ndarray]:
         observations : Units sorted by day, their subsets, and the operator from the model to the units.
     """
 
-    with np.load(PATH_OBSERVATIONS / "prepared" / f"{product}.npz", allow_pickle=False) as file:
-        return dict(file)
+    path = PATH_OBSERVATIONS / "prepared" / product
+
+    return {p.stem: np.load(p, mmap_mode="r") for p in path.glob("*.npy")}
 
 
 def products() -> list[str]:
@@ -430,7 +431,7 @@ def products() -> list[str]:
         products : Names, sorted.
     """
 
-    return sorted(p.stem for p in (PATH_OBSERVATIONS / "prepared").glob("*.npz"))
+    return sorted(p.name for p in (PATH_OBSERVATIONS / "prepared").iterdir() if p.is_dir())
 
 
 def compare_observations(
@@ -449,10 +450,10 @@ def compare_observations(
     """
 
     obs = load_product(product)
-    name, subsets = str(obs["variable"]), obs["subsets"]
+    name, subsets = obs["variable"].item(), obs["subsets"]
     sums = np.zeros((len(subsets), len(WEIGHTINGS), len(TRANSFORMS), len(STATISTICS)))
 
-    day = (pd.Timestamp(date) - pd.Timestamp(str(obs["origin"]))).days
+    day = (pd.Timestamp(date) - pd.Timestamp(obs["origin"].item())).days
     start, end = np.searchsorted(obs["unit_day"], [day, day + 1])
     if start == end:
         return sums
