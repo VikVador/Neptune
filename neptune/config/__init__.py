@@ -3,6 +3,8 @@ r"""Global paths and configuration helpers."""
 __all__ = [
     "SIMULATION",
     "SIMULATION_DATA",
+    "SIMULATION_INTERIM",
+    "PATH_MESH",
     "PATH_MAIN_SCRATCH",
     "PATH_MAIN_PROJECT",
     "PATH_NEP_PROJECT",
@@ -12,6 +14,7 @@ __all__ = [
     "PATH_PATHS",
     "PATH_DIAGNOSTICS",
     "PATH_ANALYSIS",
+    "PATH_FORECAST_ERRORS",
     "PATH_GRID_U",
     "PATH_GRID_V",
     "PATH_GRID_W",
@@ -36,6 +39,10 @@ from pathlib import Path
 SIMULATION      = Path("/gpfs/projects/acad/bsmfc/nemo4.2.0/")
 SIMULATION_DATA = SIMULATION / "BSFS_BIO" / "output_HR001"
 
+# Monthly continuation of the simulation since 2025 (interim reanalysis), and the mesh of NEMO
+SIMULATION_INTERIM = SIMULATION / "BSFS_BIO" / "output_HR001_int"
+PATH_MESH          = SIMULATION / "BSFS" / "mesh_mask.nc_new59_CMCC_noAzov"
+
 # Scratch (wiping)
 PATH_MAIN_SCRATCH = Path("/gpfs/scratch/acad/bsmfc/vmangele/")
 
@@ -53,6 +60,9 @@ PATH_MODELS      = PATH_NEP_PROJECT / "models"
 PATH_PATHS       = PATH_NEP_PROJECT / "paths"
 PATH_DIAGNOSTICS = PATH_NEP_SCRATCH / "diagnostics"
 PATH_ANALYSIS    = Path(__file__).parents[2] / "experiments" / "analysis"
+
+# Errors of the operational forecast: observations, preparation, transfers and results
+PATH_FORECAST_ERRORS = PATH_NEP_PROJECT / "forecast-errors"
 
 # ----- Others
 #
