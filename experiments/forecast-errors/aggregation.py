@@ -3,6 +3,7 @@ r"""Gather the ingredients of every run and day, then compute the metrics of eac
 import argparse
 import errors
 import json
+import netCDF4
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -10,6 +11,7 @@ import xarray as xr
 from comparisons import run_dates
 from dawgz import after, job, schedule
 from errors import PATH_DAYS, PATH_PREPARATION, PATH_RESULTS, PATH_RUNS
+from pathlib import Path
 
 from neptune.tools import freeze_modules, load_configuration
 
@@ -59,37 +61,76 @@ def groups_of_runs(runs: list[str], versions: dict[str, str]) -> dict[str, np.nd
     return groups
 
 
+def read(path: Path, group: str) -> dict[str, np.ndarray]:
+    r"""Read the variables of a group of a results file, opening it once with netCDF4.
+
+    Arguments:
+        path  : Path of the netCDF file.
+        group : Group to read, e.g. '/forecast/vs_reanalysis'.
+
+    Returns:
+        arrays : Values of each data variable of the group.
+    """
+
+    with netCDF4.Dataset(path) as ds:
+        node = ds[group]
+        return {
+            name: np.asarray(v[:])
+            for name, v in node.variables.items()
+            if name not in node.dimensions
+        }
+
+
 def gather() -> None:
     r"""Gather the ingredients of the runs and days into one store, every system stacked on (run, lead)."""
 
     with open(PATH_PREPARATION / "runs.json") as file:
         inventory = json.load(file)
-    runs = sorted(r for r in inventory if (PATH_RUNS / f"{r}.nc").exists())
+    runs = sorted(
+        r
+        for r in inventory
+        if all((SYSTEMS[s][0] / f"{r}.nc").exists() for s in ("forecast", "persistence"))
+    )
     store = PATH_RESULTS / "ingredients.zarr"
 
     for system, (folder, dim) in SYSTEMS.items():
-        groups = [
-            g
-            for g in xr.open_datatree(next(folder.glob("*.nc"))).groups
-            if g.startswith(f"/{system}/")
-        ]
-        for group in (g for g in groups if not g.endswith("/maps")):
-            parts = []
-            for run in runs:
-                if dim == "lead":
-                    ds = xr.open_dataset(folder / f"{run}.nc", group=group).load()
-                else:
-                    days = [
-                        xr.open_dataset(folder / f"{d}.nc", group=group).load()
-                        for d in run_dates(run)
-                    ]
-                    ds = xr.concat(days, "day").rename(day="lead").assign_coords(lead=range(11))
-                parts.append(ds.expand_dims(run=[run]))
-            ds = xr.concat(parts, "run")
-            ds.attrs = {
-                "description": f"Ingredients of the {system} against {group.split('/')[-1]}, per run and lead.",
-                "versions": json.dumps({r: inventory[r]["version"] for r in runs}),
+        with xr.open_datatree(next(folder.glob("*.nc")), engine="netcdf4") as tree:
+            templates = {
+                g: tree[g].to_dataset().load()
+                for g in tree.groups
+                if g.startswith(f"/{system}/") and not g.endswith("/maps")
             }
+
+        for group, template in templates.items():
+            # A day of the baselines serves up to 11 runs: each is read once
+            if dim == "day":
+                days = {
+                    d: read(folder / f"{d}.nc", group)
+                    for d in sorted({d for r in runs for d in run_dates(r)})
+                }
+            arrays = {name: [] for name in template.data_vars}
+            for run in runs:
+                values = (
+                    read(folder / f"{run}.nc", group)
+                    if dim == "lead"
+                    else {n: np.concatenate([days[d][n] for d in run_dates(run)]) for n in arrays}
+                )
+                for name in arrays:
+                    arrays[name].append(values[name])
+
+            template = template.rename(day="lead") if dim == "day" else template
+            ds = xr.Dataset(
+                {name: (("run", *template[name].dims), np.stack(x)) for name, x in arrays.items()},
+                coords={
+                    **{k: v for k, v in template.coords.items() if k != "lead"},
+                    "run": runs,
+                    "lead": range(11),
+                },
+                attrs={
+                    "description": f"Ingredients of the {system} against {group.split('/')[-1]}, per run and lead.",
+                    "versions": json.dumps({r: inventory[r]["version"] for r in runs}),
+                },
+            )
             ds.to_zarr(store, group=group.strip("/"), mode="w")
 
 
@@ -193,7 +234,7 @@ def compute_metrics() -> None:
             pooled = metrics(sel["ingredients"].sum("run"))[METRICS_POOLED]
             per_run = metrics(sel["ingredients"])[METRICS_PER_RUN].mean("run", skipna=True)
             parts.append(xr.merge([pooled, per_run]))
-        result = xr.concat(parts, pd.Index(list(groups), name="group"))
+        result = xr.concat(parts, "group").assign_coords(group=np.array(list(groups)))
         result.attrs = {
             "description": f"Metrics of {node.path}: pooled sums for the errors, per run then averaged for {', '.join(METRICS_PER_RUN)}."
         }
