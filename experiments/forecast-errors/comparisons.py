@@ -320,7 +320,7 @@ def compute_run(run: str, files: list[tuple[str, int]]) -> None:
         },
         coords={"lead": leads, "variable": DATASET_VARIABLES},
     )
-    if volume:
+    if run in RUNS_MAPS_3D:
         nan3 = np.full(next(x for x in volume if x is not None).shape, np.nan, dtype=np.float32)
         groups["forecast/maps"]["volume_error"] = (
             ("lead", "variable", "z", "y", "x"),
