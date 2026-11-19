@@ -1,0 +1,49 @@
+Cluster:
+  "light":
+    "account"   : ["bsmfc"]
+    "partition" : ["shared"]
+    "time"      : ["00:15:00"]
+    "cpus"      : [1]
+    "ram"       : ["4GB"]
+
+  "observations":
+    "account"   : ["bsmfc"]
+    "partition" : ["shared"]
+    "time"      : ["01:00:00"]
+    "cpus"      : [1]
+    "ram"       : ["16GB"]
+
+  "climatology":
+    "account"   : ["bsmfc"]
+    "partition" : ["shared"]
+    "time"      : ["00:30:00"]
+    "cpus"      : [1]
+    "ram"       : ["8GB"]
+
+  "baselines":
+    "account"   : ["bsmfc"]
+    "partition" : ["shared"]
+    "time"      : ["02:00:00"]
+    "cpus"      : [2]
+    "ram"       : ["8GB"]
+
+  "runs":
+    "account"   : ["bsmfc"]
+    "partition" : ["shared"]
+    "time"      : ["01:30:00"]
+    "cpus"      : [4]
+    "ram"       : ["20GB"]
+
+  "aggregation":
+    "account"   : ["bsmfc"]
+    "partition" : ["shared"]
+    "time"      : ["02:00:00"]
+    "cpus"      : [2]
+    "ram"       : ["32GB"]
+
+Preparation:
+  "days_per_job" : [6]
+
+Campaign:
+  "runs_per_job"      : [1]
+  "simultaneous_jobs" : [4]
