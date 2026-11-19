@@ -216,6 +216,28 @@ def hypoxia_metrics(ds: xr.Dataset) -> xr.Dataset:
     })  # fmt: skip
 
 
+def group_metrics(ds: xr.Dataset, groups: dict[str, np.ndarray]) -> xr.Dataset:
+    r"""Compute the metrics of each group of runs: pooled sums for the errors, per run then averaged for the others.
+
+    Arguments:
+        ds     : Ingredients of every run.
+        groups : Membership of each run to each group.
+
+    Returns:
+        metrics : Metrics with a dimension 'group'.
+    """
+
+    ingredients = ds["ingredients"].load()
+    parts = []
+    for member in groups.values():
+        sel = ingredients.isel(run=np.flatnonzero(member))
+        pooled = metrics(sel.sum("run"))[METRICS_POOLED]
+        per_run = metrics(sel)[METRICS_PER_RUN].mean("run", skipna=True)
+        parts.append(xr.merge([pooled, per_run]))
+
+    return xr.concat(parts, "group").assign_coords(group=np.array(list(groups)))
+
+
 def compute_metrics() -> None:
     r"""Compute the metrics of every system, reference and group of runs, pooled or averaged per run."""
 
@@ -223,18 +245,22 @@ def compute_metrics() -> None:
     for node in tree.subtree:
         if node.is_empty or node.parent is None or node.parent.is_root:
             continue
-        ds = node.to_dataset().load()
+        ds = node.to_dataset()
         groups = groups_of_runs(list(ds["run"].values), json.loads(ds.attrs["versions"]))
-        parts = []
-        for member in groups.values():
-            sel = ds.isel(run=np.flatnonzero(member))
-            if node.name == "hypoxia":
-                parts.append(hypoxia_metrics(sel.sum("run")))
-                continue
-            pooled = metrics(sel["ingredients"].sum("run"))[METRICS_POOLED]
-            per_run = metrics(sel["ingredients"])[METRICS_PER_RUN].mean("run", skipna=True)
-            parts.append(xr.merge([pooled, per_run]))
-        result = xr.concat(parts, "group").assign_coords(group=np.array(list(groups)))
+        if node.name == "hypoxia":
+            ds = ds.load()
+            parts = [
+                hypoxia_metrics(ds.isel(run=np.flatnonzero(m)).sum("run")) for m in groups.values()
+            ]
+            result = xr.concat(parts, "group").assign_coords(group=np.array(list(groups)))
+        elif "variable" in ds.dims:
+            # One variable at a time, the per-run metrics of every run not fitting in memory at once
+            result = xr.concat(
+                [group_metrics(ds.sel(variable=[n]), groups) for n in ds["variable"].values],
+                "variable",
+            )
+        else:
+            result = group_metrics(ds, groups)
         result.attrs = {
             "description": f"Metrics of {node.path}: pooled sums for the errors, per run then averaged for {', '.join(METRICS_PER_RUN)}."
         }
